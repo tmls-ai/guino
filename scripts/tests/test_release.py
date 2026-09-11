@@ -25,7 +25,7 @@ class ReleaseTests(unittest.TestCase):
         release.check(self.root, "v0.1.0")
 
     def test_legacy_tag_rejected(self):
-        with self.assertRaisesRegex(ValueError, "historical Den"):
+        with self.assertRaisesRegex(ValueError, "Guino releases require version 0.1.0 or newer"):
             release.check(self.root, "v0.0.6")
 
     def test_legacy_source_rejected_even_with_new_tag(self):

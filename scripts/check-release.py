@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refuse to publish a legacy Den tree or mismatched Guino package versions."""
+"""Require a Guino source tree and matching package versions before publishing."""
 import argparse
 import json
 from pathlib import Path
@@ -12,7 +12,7 @@ def check(root: Path, tag: str) -> None:
         raise ValueError("release tag must be a stable version such as v0.1.0")
     version = tag[1:]
     if tuple(map(int, version.split("."))) < (0, 1, 0):
-        raise ValueError("historical Den tags cannot publish Guino")
+        raise ValueError("Guino releases require version 0.1.0 or newer")
     if (root / "go.mod").read_text().splitlines()[0] != "module github.com/tmls-ai/guino":
         raise ValueError("tag must contain the Guino Go module")
     if not (root / "cmd/guino/main.go").is_file():

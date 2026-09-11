@@ -2,12 +2,10 @@
 
 Python SDK for [Guino](https://github.com/tmls-ai/guino) — the self-hosted sandbox runtime for AI agents.
 
-
 ## Installation
 
-The intended distribution name is `guino`, with Python imports from `guino`.
-It is not published as part of this migration. Install from a local Guino
-checkout:
+The distribution name is `guino`, with Python imports from `guino`. It is not
+published yet. Install from a local Guino checkout:
 
 ```bash
 python -m pip install ./sdk/python
@@ -108,23 +106,19 @@ stats = sandbox.stats()
 - Async support via `httpx`
 - Type-safe with Pydantic models
 
-## Migrating from Den
+## Compatibility
 
-Use `from guino import Guino, GuinoError`. The deprecated `Den` and `DenError`
-names remain exact aliases during 0.1.x. Imports from `den`, `den.client`,
-`den.exceptions`, `den.sandbox`, and `den.types` also remain available in the
-new distribution. Uninstall `den-sdk` before installing Guino in the same
-environment because both distributions provide the compatibility `den` package.
-HTTP routes, authentication headers, and sandbox behavior are unchanged.
+Deprecated client and error aliases and import paths remain available through
+0.1.x. Before upgrading an existing installation, follow the
+[Compatibility and upgrades](../../docs/migration.md) instructions to avoid
+conflicting packages that provide the same import paths.
 
 ## Requirements
 
 - Python >= 3.10
 - Guino server running (see [Guino repo](https://github.com/tmls-ai/guino))
 
-## License and origin
+## License
 
-This SDK preserves the MIT designation in its upstream Den package metadata.
-The Guino runtime repository retains its [AGPL-3.0 license](../../LICENSE).
-Guino continues the original [Den project](https://github.com/us/den); the rename
-does not change the SDK license metadata or the project’s history and authorship.
+The [SDK package metadata](pyproject.toml) declares MIT. The Guino runtime is licensed
+under [AGPL-3.0](../../LICENSE).

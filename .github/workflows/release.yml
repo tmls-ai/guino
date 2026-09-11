@@ -18,7 +18,7 @@ permissions:
   contents: read
 jobs:
   validate:
-    # Keep disabled during history import. Old Den tags must never publish Guino.
+    # Keep disabled during history import. Legacy tags must never publish Guino.
     if: vars.GUINO_RELEASES_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:

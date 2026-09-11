@@ -5,7 +5,7 @@
 - [Introduction](docs/introduction.md)
 - [Installation](docs/installation.md)
 - [Quick Start](docs/quick-start.md)
-- [Migration status](migration.md)
+- [Compatibility and upgrades](migration.md)
 
 ## Integrations
 

@@ -17,7 +17,7 @@ unavailable checks and external blockers explicitly, and never claim complete
 release readiness while required checks remain unverified. Re-review fixes that
 affect a reviewer's findings; avoid rerunning unchanged checks without a reason.
 
-Preserve the inherited Den commit graph, authorship, tags, licenses and copyright
+Preserve the inherited commit graph, authorship, tags, licenses and copyright
 notices. Rename work belongs in new commits. Guino remains a useful local,
 self-hosted runtime without a cloud account. Treat persisted resource names and
 configuration compatibility separately from public branding.

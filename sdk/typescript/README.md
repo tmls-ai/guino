@@ -2,11 +2,10 @@
 
 TypeScript SDK for [Guino](https://github.com/tmls-ai/guino) — the self-hosted sandbox runtime for AI agents.
 
-
 ## Installation
 
-The intended package name is `@tmls-ai/guino`. It is not published as part of
-this migration. Build from a local Guino checkout with Bun:
+The package name is `@tmls-ai/guino`. It is not published yet. Build from a
+local Guino checkout with Bun:
 
 ```bash
 cd sdk/typescript
@@ -101,22 +100,18 @@ await client.sandbox.deleteSnapshot(snapshot.id);
 - Port forwarding
 - Full TypeScript types
 
-## Migrating from Den
+## Compatibility
 
-Import from `@tmls-ai/guino` and use `Guino` and `GuinoError`. The deprecated
-`Den` and `DenError` exports remain exact aliases during 0.1.x, including
-`instanceof` checks. No old npm package is published or deprecated by this
-source migration. HTTP routes, authentication headers, and sandbox behavior
-are unchanged.
+Deprecated client and error aliases remain available through 0.1.x, including
+existing `instanceof` checks. See [Compatibility and upgrades](../../docs/migration.md)
+for the exact aliases and upgrade instructions.
 
 ## Requirements
 
 - Node.js >= 18 or Bun
 - Guino server running (see [Guino repo](https://github.com/tmls-ai/guino))
 
-## License and origin
+## License
 
-This SDK preserves the MIT designation in its upstream Den package metadata.
-The Guino runtime repository retains its [AGPL-3.0 license](../../LICENSE).
-Guino continues the original [Den project](https://github.com/us/den); the rename
-does not change the SDK license metadata or the project’s history and authorship.
+The [SDK package metadata](package.json) declares MIT. The Guino runtime is licensed
+under [AGPL-3.0](../../LICENSE).

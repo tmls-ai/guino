@@ -163,7 +163,7 @@ func DefaultConfig() *Config {
 		},
 		Runtime: RuntimeConfig{
 			Backend: "docker",
-			// Retain Den's persisted network identity during the rename.
+			// Preserve the persisted network identity across upgrades.
 			NetworkID:          "den-net",
 			DefaultNetworkMode: "internal",
 		},

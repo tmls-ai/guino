@@ -1,6 +1,6 @@
 # Installation
 
-Guino currently installs from this source checkout. Published Guino binaries, npm/PyPI packages, Homebrew and an installation domain are pending. See the [migration status](../migration.md) before assuming a remote installation command is available.
+Guino currently installs from this source checkout. Published Guino binaries, npm/PyPI packages, Homebrew and an installation domain are pending. See [Compatibility and upgrades](../migration.md) for release status and supported settings.
 
 ## Requirements
 

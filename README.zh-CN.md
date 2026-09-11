@@ -10,8 +10,6 @@
 
 [English](README.md) · [快速开始](docs/docs/quick-start.md) · [连接智能体](docs/docs/mcp.md) · [安全模型](SECURITY.md)
 
-Guino 基于 [Den](https://github.com/us/den)，保留原有 Git 历史、作者与许可证。本分支正在准备 Guino 发布，并不表示上游仓库已经转移或重定向。参见[迁移状态](docs/migration.md)。
-
 ## 本地运行
 
 需要运行中的 Docker、Docker socket 访问权限，以及 Go **1.25.7 或更新版本**。在本仓库目录中执行：
@@ -62,4 +60,4 @@ CPU 和内存默认**没有硬性上限**，上面的示例显式设置了限制
 
 目前从源码安装。npm、PyPI、Homebrew、安装域名和正式发布尚待完成；不要把计划中的包名当作已发布版本。查看 [SDK 指南](docs/docs/sdks.md)、[完整文档](docs/README.md)、[贡献说明](CONTRIBUTING.md)、[路线图](ROADMAP.md)与[历史变更](CHANGELOG.md)。
 
-运行时继续使用 [AGPL-3.0](LICENSE)。现有 SDK 的包元数据保留原有 MIT 声明。此次更名不修改历史许可或贡献者版权。
+Guino 由 [TMLS](https://github.com/tmls-ai) 与 [gjija](https://github.com/gjija) 维护。运行时采用 [AGPL-3.0](LICENSE)，TypeScript 和 Python SDK 的包元数据声明为 MIT。

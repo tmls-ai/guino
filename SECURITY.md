@@ -2,13 +2,13 @@
 
 ## Release status
 
-Guino 0.1.0 is being prepared. Historical Den releases remain in Git history; this repository does not promise security maintenance for upstream release lines. Follow the migration status and release notes for the supported Guino version when published.
+Guino 0.1.0 is being prepared. Follow the release notes for the supported Guino version when published. Historical release lines are outside the current security-maintenance scope.
 
 ## Reporting a Vulnerability
 
 Do not post exploit details, secrets or sensitive reproduction data in a public issue.
 
-Use GitHub's **Report a vulnerability** action in this repository's Security tab when private vulnerability reporting is enabled. A verified private reporting channel is a release prerequisite. If that action is unavailable, ask a listed maintainer for a private reporting channel through a verified contact on their profile, without including vulnerability details in the initial request. This migration does not claim ownership of the former Den security email address.
+Use GitHub's **Report a vulnerability** action in this repository's Security tab when private vulnerability reporting is enabled. A verified private reporting channel is a release prerequisite. If that action is unavailable, ask a listed maintainer for a private reporting channel through a verified contact on their profile, without including vulnerability details in the initial request.
 
 Include the affected commit/version, deployment topology, reproduction steps, impact and any suggested fix in the private report. A response-time service level has not been established for Guino.
 

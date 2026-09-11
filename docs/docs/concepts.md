@@ -30,6 +30,6 @@ The CLI supports snapshot create and restore. Listing/removing snapshots is avai
 
 Named Docker volumes survive sandbox destruction and can be mounted read/write or read-only across sandboxes. Sharing data also shares a trust boundary. Temporary files use configurable tmpfs; optional S3 import/export and hooks move data to object storage. S3 FUSE requires an explicit opt-in.
 
-The legacy `den-` volume prefixes, `den-net` managed network, `den.*` ownership labels and `den.db` store name remain for compatibility. They are implementation identifiers, not unused migration leftovers. Do not rename or delete them to complete a branding change.
+Guino uses `den-` volume prefixes, the `den-net` managed network, `den.*` ownership labels and the `den.db` store name as persisted runtime identifiers. Keep these names intact when upgrading so the runtime can find its existing state and resources.
 
 See [Architecture](architecture.md) for runtime details and [REST API](rest-api.md) for storage configuration and endpoints.

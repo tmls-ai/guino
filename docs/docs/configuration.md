@@ -6,7 +6,7 @@ An explicit `--config` selects a file. Without it, `guino.yaml` in the working d
 
 The YAML below is a configuration reference with example limits, not a ready-to-run deployment: `0.0.0.0`, auth off and `internal` networking are refused by the bind guard. Use the [quickstart](quick-start.md) for a working local setup. Runtime defaults are `guino/default:latest`, 100 sandboxes, and CPU/memory limits of 0 (unlimited). Build the default image locally or choose an available image.
 
-Persisted names `den.db` and `den-net` remain unchanged for compatibility. Do not rename them merely to remove old branding.
+Persisted names `den.db` and `den-net` identify the runtime's state and managed network. Preserve them when upgrading so existing resources remain discoverable.
 
 ## guino.yaml
 
@@ -256,25 +256,23 @@ threat model and trust boundary.
 
 ## Upgrading
 
-For the Guino naming changes, see the [migration guide](../migration.md). The notes below describe inherited Den behavior, not new Guino 0.1.0 runtime changes.
+See [Compatibility and upgrades](../migration.md) for supported configuration
+aliases and persisted resource names. Check these settings when upgrading:
 
-- **Bind-guard refusal (already in effect, not new here).** Since the
-  `feat!` network-isolation change (`9ad8988`), `guino serve` **refuses to
-  start** when the unauthenticated HTTP control plane would be reachable from
-  sandboxes on a host that is not machine-detectably safe. If you upgraded past
-  `9ad8988` you have already adopted this. Remediation, in order of preference:
-  set `auth.enabled=true` with `api_keys`; or run with effective
-  `network_mode=none`; or, **only** on a genuinely native-Linux host where the
-  Docker socket, the bridge gateway and the guino process are co-resident, attest
-  it explicitly with `runtime.platform_override="linux-native-docker-co-resident"`
-  (void on proxied/remote/VM Docker — see `SECURITY.md` §10/§11).
-- **S3 internal endpoint now blocked by default (inherited default-deny behavior).** A self-hosted S3/MinIO on `localhost` or the LAN that worked
-  before is now refused unless you set `s3.allow_internal_endpoint: true` (env
-  `GUINO_S3__ALLOW_INTERNAL_ENDPOINT=true`). This is additive and defaults to the
-  secure posture; the only action required is the explicit opt-in for self-host
-  topologies.
-- **`Config.String()` diagnostic output (inherited behavior).** The
-  startup `"s3 config"` log line and any config dump now mask **both**
-  `access_key` and `secret_key` (previously only `secret_key`). Log scrapers
-  that parsed a cleartext access key from logs must be updated; no on-the-wire
-  or config-file behavior changed.
+- **Bind guard.** `guino serve` refuses unsafe unauthenticated API exposure.
+  Enable `auth.enabled` with non-empty `auth.api_keys`, or bind
+  `server.host=127.0.0.1` and use `runtime.default_network_mode=none` for a
+  trusted local setup. The
+  `runtime.platform_override="linux-native-docker-co-resident"` attestation is
+  supported only when the Docker socket, bridge gateway and Guino process are
+  co-resident on native Linux. The code trusts this assertion and does not
+  verify it; do not use it for proxied, remote or VM Docker. See the
+  [security model](../../SECURITY.md) for the complete bind matrix.
+- **Private S3 endpoints.** Access to S3/MinIO on `localhost` or the LAN is
+  blocked by default. Configure the trusted endpoint and set
+  `s3.allow_internal_endpoint: true` (environment variable
+  `GUINO_S3__ALLOW_INTERNAL_ENDPOINT=true`) when this access is required.
+  Per-sandbox endpoint overrides are refused while the exemption is active.
+- **Diagnostic output.** The startup `"s3 config"` log line and
+  `Config.String()` output mask both `access_key` and `secret_key`. Log
+  processing must not rely on recovering credentials from these values.

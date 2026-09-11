@@ -18,7 +18,7 @@ store:
   path: /absolute/path/guino-mcp.db
 ```
 
-This configuration disables external sandbox networking (container loopback remains) and sets explicit limits. Each runtime needs exclusive ownership of its BoltDB and managed Docker resources. Do not run `serve`, Den or another MCP process against the same database/resources concurrently. Use one client at a time for this setup; a second database alone does not isolate shared Docker ownership labels.
+This configuration disables external sandbox networking (container loopback remains) and sets explicit limits. Each runtime needs exclusive ownership of its BoltDB and managed Docker resources. Do not run `serve` or another runtime process against the same database/resources concurrently. Use one client at a time for this setup; a second database alone does not isolate shared Docker ownership labels.
 
 The process command is:
 

@@ -1,16 +1,18 @@
 # SDKs
 
-guino provides official SDKs for Go, TypeScript, and Python.
+Guino provides official SDKs for Go, TypeScript, and Python.
 
-Published packages are pending. Use the SDKs from this checkout; registry availability alone does not establish publishing ownership.
+The SDK packages are not published yet. Install from this checkout.
 
-| SDK | Intended identity | Source setup |
+| SDK | Package or module | Source setup |
 |-----|-------------------|--------------|
 | Go | `github.com/tmls-ai/guino/pkg/client` | Use the module in this checkout, or a local `replace` in a consuming Go module |
 | TypeScript | `@tmls-ai/guino` | [TypeScript source installation](../../sdk/typescript/README.md) |
 | Python | distribution `guino`, import `guino` | `python -m pip install ./sdk/python` from the repository root |
 
-The TypeScript/Python primary classes are `Guino`/`GuinoError`; deprecated `Den`/`DenError` aliases are retained through 0.1.x. Python also retains the old `den` import shim. The SDK package metadata retains its original MIT declarations; the runtime remains AGPL-3.0.
+The TypeScript and Python primary classes are `Guino` and `GuinoError`. Deprecated client/error aliases and Python import paths remain available through 0.1.x. See [Compatibility and upgrades](../migration.md) for exact aliases and the package cleanup required before upgrading an existing Python installation.
+
+The SDK package metadata declares MIT; the Guino runtime is licensed under [AGPL-3.0](../../LICENSE).
 
 The examples below assume [the API server](quick-start.md) is already running. They are usage fragments; handle errors and clean up resources in your application. Images must contain the invoked executable.
 

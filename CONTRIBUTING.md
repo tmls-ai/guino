@@ -1,6 +1,6 @@
 # Contributing to Guino
 
-Guino builds on Den with preserved history and attribution. Keep the local runtime useful without a cloud account, and keep migration changes on top of existing commits.
+Help make Guino a reliable local runtime for AI agents. Local execution must remain useful without a cloud account.
 
 ## Development Setup
 
@@ -103,9 +103,9 @@ sdk/
   python/         — Python SDK
 ```
 
-## Migration and compatibility
+## Compatibility
 
-Keep historical commits, tags, authors and changelog entries unchanged. `den.db`, `den-net`, `den.*` ownership labels, and snapshot/volume prefixes are intentional compatibility identifiers. Guino 0.1.x retains documented legacy config/environment and SDK aliases; any later removal needs an announced migration path.
+Preserve historical commits, tags, authors, changelog entries and copyright notices. Guino 0.1.x retains legacy configuration and SDK aliases, plus persisted resource identifiers. Follow [Compatibility and upgrades](docs/migration.md) when changing these interfaces; any removal needs an announced upgrade path.
 
 Use source installs until release artifacts and package publishing are verified. Update CLI examples against actual `--help`; do not document placeholder cloud or MCP installation commands.
 

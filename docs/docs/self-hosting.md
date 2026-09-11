@@ -10,9 +10,9 @@ The default bind is `0.0.0.0`, default auth is off and default networking is `in
 
 ## Runtime ownership and backups
 
-One Guino process must own a database and its Docker resources. Do not run Den, `serve`, or multiple MCP processes against those resources simultaneously. A different database alone does not isolate shared container ownership labels. Separate hosts/daemons are the straightforward way to isolate independent runtime instances.
+One Guino process must own a database and its Docker resources. Do not run multiple API servers, MCP servers or other runtime processes against those resources simultaneously. A different database alone does not isolate shared container ownership labels. Separate hosts/daemons are the straightforward way to isolate independent runtime instances.
 
-Preserve the store file, Docker volumes and snapshot images when migrating. `den.db`, `den-net`, `den.*` labels, and existing snapshot/volume prefixes are intentional compatibility identifiers. Stop the runtime before making a consistent file backup; use Docker-aware backups for volume data and image snapshots. A database copy alone does not back up container data.
+Preserve the store file, Docker volumes and snapshot images when upgrading. `den.db`, `den-net`, `den.*` labels, and existing snapshot/volume prefixes are persisted runtime identifiers. Stop the runtime before making a consistent file backup; use Docker-aware backups for volume data and image snapshots. A database copy alone does not back up container data.
 
 Graceful API server shutdown destroys running sandboxes. Tmpfs data is temporary. Abrupt shutdown may leave resources for startup reconciliation; the expiry loop needs a running engine. Keep important artifacts in backed-up volumes or export them explicitly.
 

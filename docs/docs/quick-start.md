@@ -12,7 +12,7 @@ GUINO_SANDBOX__DEFAULT_MEMORY=536870912 \
 ./bin/guino serve
 ```
 
-The API and dashboard run at `http://127.0.0.1:8080`. The sandbox has only its own loopback network interface. Authentication is disabled by default, so use this example only on a trusted local machine. Existing `guino.yaml`/legacy `den.yaml` settings and environment overrides still apply.
+The API and dashboard run at `http://127.0.0.1:8080`. The sandbox has only its own loopback network interface. Authentication is disabled by default, so use this example only on a trusted local machine. Existing configuration files and environment overrides still apply.
 
 The unconfigured server uses `0.0.0.0`, authentication off and `internal` networking; the bind guard intentionally refuses that combination. The explicit loopback/`none` settings above avoid bypassing that guard.
 

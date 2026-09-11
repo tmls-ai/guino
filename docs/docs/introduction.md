@@ -4,8 +4,6 @@
 
 Guino gives agents Docker sandboxes for executing code through a CLI, REST API, WebSocket, SDK or MCP connection. The runtime is self-hosted and remains useful without a commercial service or Guino account.
 
-This project derives from Den and preserves its Git history, authors and license. The Guino migration adds a new identity and adoption path on top of that work; it does not claim the upstream repository was transferred.
-
 ## Start with your workflow
 
 - [Quick Start](quick-start.md): build the binary, create a sandbox, execute a command and clean up.

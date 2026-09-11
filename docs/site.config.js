@@ -122,7 +122,7 @@ export default {
   ],
   "defaultPage": "introduction",
   "footer": {
-    "left": "Runtime: AGPL-3.0 · Derived from Den",
+    "left": "Runtime: AGPL-3.0",
     "right": "Guino — Local infrastructure for AI agents"
   }
 };

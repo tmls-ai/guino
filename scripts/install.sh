@@ -26,7 +26,7 @@ fi
 version=${version#v}
 printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' ||
   fail 'GUINO_VERSION must be a stable version such as v0.1.0'
-case "$version" in 0.0.*) fail 'Historical Den releases are not Guino binaries' ;; esac
+case "$version" in 0.0.*) fail 'Guino binaries require version 0.1.0 or newer' ;; esac
 
 archive="guino_${version}_${os}_${arch}.tar.gz"
 url="https://github.com/tmls-ai/guino/releases/download/v${version}"

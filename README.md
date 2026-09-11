@@ -19,7 +19,7 @@ Guino gives AI agents a place to run commands, work with files and keep useful s
 
 Everything runs on infrastructure you control. Once the binary and required container images are installed, the local runtime works offline.
 
-**Release status:** build from source today. Guino binaries and npm/PyPI packages are not published yet; `v0.1.0` is planned. Existing `v0.0.x` tags preserve the original Den releases. See the [migration guide](docs/migration.md) for compatibility and release status.
+**Release status:** build from source today. Guino binaries and npm/PyPI packages are not published yet; `v0.1.0` is planned. Follow the [installation guide](docs/docs/installation.md) to get started.
 
 ## Why Guino
 
@@ -133,10 +133,8 @@ Read the [security model](SECURITY.md) and [self-hosting guide](docs/docs/self-h
 
 Contributions are welcome: clear bug reports, reproducible tests, documentation improvements and focused pull requests all help. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Origins and license
+## Maintainers and license
 
-Guino builds on [Den](https://github.com/us/den), created by [us](https://github.com/us). Its original commits, authors, tags and [historical changelog](CHANGELOG.md) remain intact. The Guino relaunch is maintained by [TMLS](https://github.com/tmls-ai), with [gjija](https://github.com/gjija). Guino changes are new commits on top of that history.
+Guino is maintained by [TMLS](https://github.com/tmls-ai), with [gjija](https://github.com/gjija).
 
-Existing Den users can follow the [migration guide](docs/migration.md) for legacy configuration, SDK aliases and preserved resource identifiers.
-
-The runtime remains **AGPL-3.0**; see [LICENSE](LICENSE). Existing SDK package metadata retains its original MIT declarations. This rename does not relicense existing code or transfer contributors' copyright.
+The runtime is licensed under **AGPL-3.0**; see [LICENSE](LICENSE). The [TypeScript](sdk/typescript/package.json) and [Python](sdk/python/pyproject.toml) SDK package metadata declares MIT.

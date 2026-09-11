@@ -1,15 +1,15 @@
 # Guino Roadmap
 
-Guino develops the local sandbox runtime inherited from Den. The source history, attribution and existing licenses remain intact. This roadmap records intent, not release promises.
+Guino develops local infrastructure for AI agents. This roadmap records intent, not release promises.
 
 ## Guino 0.1.0 preparation
 
-- Complete the public CLI/module/package rename and temporary compatibility aliases.
+- Publish CLI binaries and SDK release artifacts.
 - Verify source builds, SDKs, MCP tool use and Docker-backed execution/cleanup.
 - Publish accurate local onboarding, security boundaries and contributor guidance.
 - Resolve repository administration, package ownership and release infrastructure before publishing artifacts.
 
-The [migration status](docs/migration.md) records completed work and release gates. Original Den tags and changelog entries remain historical records.
+See [Compatibility and upgrades](docs/migration.md) for supported interfaces and release requirements.
 
 ## Local runtime priorities
 
@@ -21,4 +21,4 @@ The [migration status](docs/migration.md) records completed work and release gat
 
 ## Future managed compute
 
-Managed fleet capacity, scheduling, billing and commercial services may live in separate repositories later. They are outside this migration. Local execution must remain independently useful, with no account requirement or placeholder cloud commands.
+Managed fleet capacity, scheduling, billing and commercial services may live in separate repositories later. Local execution must remain independently useful, with no account requirement or placeholder cloud commands.
