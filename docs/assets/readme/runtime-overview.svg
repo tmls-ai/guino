@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="464" viewBox="0 0 1000 464" role="img" aria-labelledby="title desc">
+  <title id="title">Guino runtime overview</title>
+  <desc id="desc">MCP clients use guino mcp to run the engine directly. CLI and SDK clients use guino serve over HTTP or WebSockets. Both are alternative entry points into the engine that manages Docker sandboxes. Guino has one binary, eleven MCP tools and three SDKs. Build from source today. Docker is required.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 8 4 0 8Z" fill="#B6F36B"/></marker>
+  </defs>
+  <rect width="1000" height="464" rx="20" fill="#0B0E10"/>
+  <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="40" y="40" fill="#B6F36B" font-size="12" font-weight="700" letter-spacing="2">GUINO / CURRENT RUNTIME</text>
+    <text x="40" y="88" fill="#F3F5F1" font-size="34" font-weight="650">A local runtime for your agent</text>
+    <text x="40" y="120" fill="#AEB6BE" font-size="17">Choose the entry point that fits your tools.</text>
+
+    <g fill="#151B20" stroke="#303941" stroke-width="1">
+      <rect x="40" y="152" width="240" height="72" rx="12"/>
+      <rect x="40" y="246" width="240" height="72" rx="12"/>
+      <rect x="374" y="152" width="250" height="72" rx="12"/>
+      <rect x="374" y="246" width="250" height="72" rx="12"/>
+      <rect x="726" y="191" width="234" height="90" rx="12" stroke="#B6F36B"/>
+    </g>
+    <g fill="none" stroke="#B6F36B" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M280 188H358"/>
+      <path d="M280 282H358"/>
+      <path d="M624 188H673V236H710"/>
+      <path d="M624 282H673V236H710"/>
+    </g>
+    <g fill="#F3F5F1" font-size="21" font-weight="600">
+      <text x="59" y="181">Your MCP client</text>
+      <text x="59" y="275">Your CLI or app</text>
+      <text x="394" y="181" fill="#B6F36B">guino mcp</text>
+      <text x="394" y="275" fill="#73CFFE">guino serve</text>
+      <text x="745" y="227">Docker sandboxes</text>
+    </g>
+    <g fill="#AEB6BE" font-size="15">
+      <text x="59" y="205">Claude Code / Codex / Cursor</text>
+      <text x="59" y="299">REST API and SDKs</text>
+      <text x="394" y="205">Engine runs directly</text>
+      <text x="394" y="299">HTTP and WebSocket API</text>
+      <text x="745" y="253">Commands and files</text>
+    </g>
+    <path d="M40 349H960" stroke="#303941"/>
+    <g font-size="31" font-weight="650">
+      <text x="40" y="394" fill="#B6F36B">1 <tspan fill="#F3F5F1" font-size="21">binary</tspan></text>
+      <text x="375" y="394" fill="#73CFFE">11 <tspan fill="#F3F5F1" font-size="21">MCP tools</tspan></text>
+      <text x="746" y="394" fill="#FF9E52">3 <tspan fill="#F3F5F1" font-size="21">SDKs</tspan></text>
+    </g>
+    <text x="40" y="430" fill="#AEB6BE" font-size="14">Build from source today. Docker required.</text>
+    <text x="746" y="430" fill="#AEB6BE" font-size="14">Go / TypeScript / Python</text>
+  </g>
+</svg>

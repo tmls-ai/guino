@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="356" viewBox="0 0 1000 356" role="img" aria-labelledby="title desc">
+  <title id="title">A Guino sandbox through a task</title>
+  <desc id="desc">Create a sandbox with an image, resource limits and expiry. Execute commands, stream output and work with files. Preserve useful state using image snapshots, volumes or optional S3. Destroy the sandbox explicitly, or let it expire while the runtime is active. Image snapshots do not capture process memory or mounted-volume contents.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 8 4 0 8Z" fill="#788590"/></marker>
+  </defs>
+  <rect width="1000" height="356" rx="20" fill="#0B0E10"/>
+  <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="40" y="40" fill="#B6F36B" font-size="12" font-weight="700" letter-spacing="2">SANDBOX LIFECYCLE</text>
+    <text x="40" y="87" fill="#F3F5F1" font-size="32" font-weight="650">A workspace for each task</text>
+    <g fill="none" stroke="#788590" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M100 145H258"/>
+      <path d="M334 145H492"/>
+      <path d="M568 145H726"/>
+    </g>
+    <g font-size="16" font-weight="700" text-anchor="middle">
+      <circle cx="63" cy="145" r="23" fill="#B6F36B"/><text x="63" y="151" fill="#0B0E10">01</text>
+      <circle cx="297" cy="145" r="23" fill="#73CFFE"/><text x="297" y="151" fill="#0B0E10">02</text>
+      <circle cx="531" cy="145" r="23" fill="#FF9E52"/><text x="531" y="151" fill="#0B0E10">03</text>
+      <circle cx="765" cy="145" r="23" fill="#B89BFF"/><text x="765" y="151" fill="#0B0E10">04</text>
+    </g>
+    <g fill="#F3F5F1" font-size="24" font-weight="600">
+      <text x="40" y="200">Create</text>
+      <text x="274" y="200">Execute</text>
+      <text x="508" y="200">Keep useful state</text>
+      <text x="742" y="200">Clean up</text>
+    </g>
+    <g fill="#AEB6BE" font-size="17">
+      <text x="40" y="231">Choose an image.</text>
+      <text x="40" y="255">Set limits and expiry.</text>
+      <text x="274" y="231">Run commands.</text>
+      <text x="274" y="255">Read output and files.</text>
+      <text x="508" y="231">Image snapshots.</text>
+      <text x="508" y="255">Volumes or optional S3.</text>
+      <text x="742" y="231">Destroy explicitly.</text>
+      <text x="742" y="255">Or let the sandbox expire.</text>
+    </g>
+    <path d="M40 285H960" stroke="#303941"/>
+    <text x="40" y="320" fill="#AEB6BE" font-size="14">Expiry requires an active runtime. Choose what to preserve before removing the sandbox.</text>
+  </g>
+</svg>

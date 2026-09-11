@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/guino.png" width="280" alt="Guino, a black-and-white guinea pig mascot">
+  <img src="docs/assets/guino.png" width="180" alt="Guino, a black-and-white guinea pig mascot">
 </p>
 
 <h1 align="center">Guino</h1>
@@ -9,6 +9,7 @@
 
 <p align="center">
   <a href="#quickstart">Quickstart</a> ·
+  <a href="#how-guino-fits">How it works</a> ·
   <a href="#connect-your-agent">Connect your agent</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="CONTRIBUTING.md">Contribute</a> ·
@@ -21,13 +22,18 @@ Everything runs on infrastructure you control. Once the binary and required cont
 
 **Release status:** build from source today. Guino binaries and npm/PyPI packages are not published yet; `v0.1.0` is planned. Follow the [installation guide](docs/docs/installation.md) to get started.
 
-## Why Guino
+## How Guino fits
 
-- **Give agents a workspace.** Create a sandbox, execute code, read the result and clean up when the task ends.
-- **Connect the tools you already use.** Run a stdio MCP server for Claude Code, Codex, Cursor or another MCP client; use the API and SDKs for custom agents.
-- **Keep state deliberately.** Use image snapshots, persistent volumes and optional S3 import/export for different kinds of data.
-- **Control execution.** Configure timeouts, CPU, memory, PID limits and sandbox networking on your own Docker host.
-- **See what is running.** Manage sandboxes through the CLI or embedded dashboard.
+<p align="center">
+  <picture>
+    <source media="(max-width: 600px)" srcset="docs/assets/readme/runtime-overview-mobile.svg">
+  <img src="docs/assets/readme/runtime-overview.svg" width="1000" alt="Guino has one binary, 11 MCP tools and three SDKs. MCP clients run guino mcp directly; CLI and SDK clients connect to guino serve. Both entry points use the engine to manage Docker sandboxes. Build from source today; Docker is required.">
+  </picture>
+</p>
+
+Use **MCP** to give your agent direct access to the sandbox engine, or **serve** to connect through the CLI, API and SDKs. Each runtime needs exclusive ownership of its managed Docker resources; the [connection guide](#connect-your-agent) explains how to switch between them.
+
+Configure execution limits and networking on your Docker host, keep useful state with volumes or image snapshots, and see what is running in the embedded dashboard.
 
 ## Quickstart
 
@@ -71,6 +77,17 @@ docker build -t guino/default:latest images/default/
 ```
 
 Continue with the [full quickstart](docs/docs/quick-start.md) or [installation guide](docs/docs/installation.md).
+
+## A sandbox for each task
+
+<p align="center">
+  <picture>
+    <source media="(max-width: 600px)" srcset="docs/assets/readme/sandbox-lifecycle-mobile.svg">
+  <img src="docs/assets/readme/sandbox-lifecycle.svg" width="1000" alt="Create a sandbox with an image, limits and expiry. Execute commands and work with files. Keep useful state with image snapshots, volumes or optional S3. Destroy the sandbox explicitly or let it expire while the runtime is active.">
+  </picture>
+</p>
+
+Keep temporary work in the sandbox and preserve the results you need. **Image snapshots** save filesystem changes; **volumes** and optional **S3 transfers** handle data you want to keep separately. Snapshots do not capture running processes, tmpfs or mounted-volume contents. See [core concepts](docs/docs/concepts.md) for the storage model.
 
 ## Connect your agent
 
