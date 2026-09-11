@@ -149,7 +149,8 @@ jobs:
       - name: Install docker CLI
         run: |
           apt-get update -qq
-          apt-get install -y --no-install-recommends docker.io ca-certificates
+          apt-get install -y --no-install-recommends docker-cli ca-certificates
+          docker --version
       - name: Verify Docker daemon is reachable
         run: |
           set -e
@@ -157,7 +158,7 @@ jobs:
           # DOCKER_HOST also redirects the runner's own host-side docker exec.
           export DOCKER_HOST=tcp://docker:2375
           for i in $(seq 1 30); do
-            if docker info >/dev/null 2>&1; then
+            if docker info >/tmp/docker-readiness.log 2>&1; then
               echo "Docker daemon reachable after $i attempt(s)"
               docker info
               exit 0
@@ -165,6 +166,7 @@ jobs:
             echo "Docker not ready yet (attempt $i/30), retrying..."
             sleep 2
           done
+          cat /tmp/docker-readiness.log
           echo "::error::Docker daemon unreachable at $DOCKER_HOST after 60s"
           exit 1
       - name: Prepare sandbox images and S3 fixture

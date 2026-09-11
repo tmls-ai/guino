@@ -18,6 +18,31 @@ describe("Guino SDK migration", () => {
     expect(error.statusCode).toBe(401);
   });
 
+  test("URL trimming preserves empty URLs, paths, and long internal slash runs", async () => {
+    const interiorSlashes = "/".repeat(100_000);
+    const cases = [
+      ["", ""],
+      ["/", ""],
+      ["///", ""],
+      ["http://guino.test", "http://guino.test"],
+      ["http://guino.test/api///", "http://guino.test/api"],
+      ["http://guino.test/path//?query=x", "http://guino.test/path//?query=x"],
+      ["http://guino.test/path///\n", "http://guino.test/path///\n"],
+      [`http://guino.test${interiorSlashes}tail`, `http://guino.test${interiorSlashes}tail`],
+      [`http://guino.test${interiorSlashes}`, "http://guino.test"],
+    ] as const;
+    let requestedUrl: string | undefined;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requestedUrl = String(input);
+      return Response.json({ status: "ok" });
+    }) as typeof fetch;
+
+    for (const [url, expectedBase] of cases) {
+      expect(await new Guino({ url }).health()).toBe(true);
+      expect(requestedUrl).toBe(`${expectedBase}/api/v1/health`);
+    }
+  });
+
   for (const [name, Client] of [["Guino", Guino], ["Den", Den]] as const) {
     test(`${name} retain HTTP paths and auth`, async () => {
       const hits: { url: string; apiKey: string | null }[] = [];

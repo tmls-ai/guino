@@ -273,11 +273,18 @@ async function loadPage(slug) {
         : new URL(href, documentUrl).href;
     });
   } catch {
-    article.innerHTML = `
-      <h1>Page Not Found</h1>
-      <p>The page <code>${slug}</code> could not be found.</p>
-      <p><a href="#${config.defaultPage}">Go to ${getPageTitle(config.defaultPage)}</a></p>
-    `;
+    const heading = document.createElement("h1");
+    heading.textContent = "Page Not Found";
+    const requestedPage = document.createElement("code");
+    requestedPage.textContent = slug;
+    const message = document.createElement("p");
+    message.append("The page ", requestedPage, " could not be found.");
+    const homeLink = document.createElement("a");
+    homeLink.href = `#${config.defaultPage}`;
+    homeLink.textContent = `Go to ${getPageTitle(config.defaultPage)}`;
+    const navigation = document.createElement("p");
+    navigation.append(homeLink);
+    article.replaceChildren(heading, message, navigation);
   }
 
   const pageTitle = getPageTitle(slug);

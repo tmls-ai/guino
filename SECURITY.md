@@ -16,6 +16,8 @@ Include the affected commit/version, deployment topology, reproduction steps, im
 
 Guino targets local development and self-hosted environments with a trusted operator. Docker containers share a kernel: these controls do not constitute a universal boundary for hostile multi-tenant execution. Access to the Docker socket grants control over its host. API keys grant broad runtime access, not per-tenant authorization.
 
+Use randomly generated, high-entropy API keys rather than human passwords, and protect the configuration that contains them. The middleware hashes keys in memory to compare fixed-length digests in constant time. It does not store a password database or provide password-at-rest protection.
+
 The runtime applies the following controls:
 
 - **Capabilities**: `ALL` dropped; `NET_BIND_SERVICE`, `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE` and `FOWNER` added back

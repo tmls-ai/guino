@@ -19,8 +19,10 @@ export class Guino {
   private readonly headers: Record<string, string>;
 
   constructor(config: ClientConfig) {
-    // Strip trailing slash from URL
-    this.baseUrl = config.url.replace(/\/+$/, "");
+    // Remove only the trailing slash suffix, without regex backtracking.
+    let end = config.url.length;
+    while (end > 0 && config.url[end - 1] === "/") end--;
+    this.baseUrl = config.url.slice(0, end);
     this.headers = {};
 
     if (config.apiKey) {
