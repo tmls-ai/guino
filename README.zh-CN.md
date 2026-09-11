@@ -1,4 +1,8 @@
-# Guino
+<p align="center">
+  <img src="docs/assets/guino.png" width="280" alt="Guino，黑白色豚鼠吉祥物">
+</p>
+
+<h1 align="center">Guino</h1>
 
 **面向 AI 智能体的本地基础设施。**
 

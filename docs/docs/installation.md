@@ -35,14 +35,4 @@ docker build -t guino/default:latest images/default/
 
 `guino/default:latest` is a locally built image, not a promise of a published registry image. Existing installations may keep an explicit `sandbox.default_image` setting. For offline operation, build or pull every required image before disconnecting.
 
-## Optional server container
-
-Build the server image locally:
-
-```bash
-docker build -t guino-server:local .
-```
-
-Running the server inside Docker requires carefully granting access to a Docker daemon and persistent state. Access to that socket grants host-level container control; review the [self-hosting guide](self-hosting.md) first.
-
-Continue with [Quick Start](quick-start.md) or [MCP setup](mcp.md).
+Continue with [Quick Start](quick-start.md), [MCP setup](mcp.md) or the [self-hosting guide](self-hosting.md) for persistent state, authentication and Docker access.
