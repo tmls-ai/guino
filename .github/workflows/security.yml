@@ -17,7 +17,13 @@ jobs:
       security-events: write
     strategy:
       matrix:
-        language: [go, javascript-typescript, python]
+        include:
+          - language: go
+            build_mode: autobuild
+          - language: javascript-typescript
+            build_mode: none
+          - language: python
+            build_mode: none
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -26,5 +32,5 @@ jobs:
       - uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          build-mode: none
+          build-mode: ${{ matrix.build_mode }}
       - uses: github/codeql-action/analyze@v3

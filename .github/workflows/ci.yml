@@ -141,7 +141,6 @@ jobs:
         env:
           DOCKER_TLS_CERTDIR: ""
     env:
-      DOCKER_HOST: tcp://docker:2375
       MINIO_ENDPOINT: http://docker:9000
     steps:
       - uses: actions/checkout@v4
@@ -154,6 +153,9 @@ jobs:
       - name: Verify Docker daemon is reachable
         run: |
           set -e
+          # Scope this to the shell inside the job container. A job-level
+          # DOCKER_HOST also redirects the runner's own host-side docker exec.
+          export DOCKER_HOST=tcp://docker:2375
           for i in $(seq 1 30); do
             if docker info >/dev/null 2>&1; then
               echo "Docker daemon reachable after $i attempt(s)"
@@ -168,6 +170,7 @@ jobs:
       - name: Prepare sandbox images and S3 fixture
         run: |
           set -euo pipefail
+          export DOCKER_HOST=tcp://docker:2375
           docker pull busybox:latest
           docker pull alpine:latest
           docker network create guino-ci-minio
@@ -193,6 +196,7 @@ jobs:
       - name: Run integration tests (with min-test-count gate)
         run: |
           set -euo pipefail
+          export DOCKER_HOST=tcp://docker:2375
           # Docker publishes on the service container's loopback, not this
           # runner's. Both positive and negative host-port proofs are mandatory
           # in native-host below; neither can be proven by this remote daemon.

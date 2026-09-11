@@ -26,7 +26,7 @@ func (b *LinuxMemoryBackend) HostMemory() (total, used, free uint64, err error) 
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("opening /proc/meminfo: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // Read-only procfs handle; close cannot affect the parsed result.
 
 	var memTotal, memAvailable uint64
 	scanner := bufio.NewScanner(f)
@@ -75,6 +75,7 @@ func (b *LinuxMemoryBackend) ContainerMemory(containerID string) (uint64, error)
 	}
 
 	for _, path := range paths {
+		// #nosec G304 -- The fixed cgroup paths contain only an ID validated above; no dots or path separators are allowed.
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
