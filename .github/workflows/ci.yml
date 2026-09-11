@@ -362,7 +362,7 @@ jobs:
       - name: Installer regression tests
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Check GoReleaser config
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'
           args: check
