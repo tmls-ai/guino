@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Client is the Go client for the Den API.
+// Client is the Go client for the Guino API.
 type Client struct {
 	baseURL    string
 	apiKey     string
@@ -42,7 +42,7 @@ func WithHTTPClient(hc *http.Client) Option {
 	}
 }
 
-// New creates a new Den client.
+// New creates a new Guino client.
 func New(baseURL string, opts ...Option) *Client {
 	c := &Client{
 		baseURL: baseURL,
@@ -60,7 +60,7 @@ func New(baseURL string, opts ...Option) *Client {
 type PortMapping struct {
 	SandboxPort int `json:"sandbox_port"`
 	HostPort    int `json:"host_port"`
-	// Protocol is always "tcp"; Den does not support udp port publishing.
+	// Protocol is always "tcp"; Guino does not support udp port publishing.
 	Protocol string `json:"protocol,omitempty"`
 }
 
@@ -164,7 +164,7 @@ func (c *Client) requireFeature(ctx context.Context, feat string) error {
 		}
 	}
 	if !c.features[feat] {
-		return fmt.Errorf("server does not advertise the %q feature; upgrade Den or omit network_mode", feat)
+		return fmt.Errorf("server does not advertise the %q feature; upgrade Guino or omit network_mode", feat)
 	}
 	return nil
 }

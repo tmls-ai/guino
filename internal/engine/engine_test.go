@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/us/den/internal/config"
-	"github.com/us/den/internal/engine/enginetest"
-	"github.com/us/den/internal/runtime"
-	"github.com/us/den/internal/runtime/netpolicy"
-	"github.com/us/den/internal/store"
+	"github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/internal/engine/enginetest"
+	"github.com/tmls-ai/guino/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime/netpolicy"
+	"github.com/tmls-ai/guino/internal/store"
 )
 
 func newTestEngine(t *testing.T) (*Engine, *enginetest.MockRuntime) {

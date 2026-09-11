@@ -17,12 +17,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/us/den/internal/config"
-	"github.com/us/den/internal/engine"
-	"github.com/us/den/internal/runtime"
-	"github.com/us/den/internal/runtime/docker"
-	"github.com/us/den/internal/runtime/netpolicy"
-	"github.com/us/den/internal/store"
+	"github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/internal/engine"
+	"github.com/tmls-ai/guino/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime/docker"
+	"github.com/tmls-ai/guino/internal/runtime/netpolicy"
+	"github.com/tmls-ai/guino/internal/store"
 )
 
 // The network behavioral matrix. Every row is a real container on a real
@@ -175,7 +175,9 @@ func TestIntegration_Network_InternalNoHostPublish(t *testing.T) {
 		Ports: []runtime.PortMapping{{SandboxPort: 8080, HostPort: hostPort, Protocol: "tcp"}},
 	})
 	require.NoError(t, err)
-	_, _ = execIn(t, eng, sb.ID, "sh", "-c", "mkdir -p /tmp/www && echo hi > /tmp/www/index.html && httpd -p 8080 -h /tmp/www")
+	start, err := execIn(t, eng, sb.ID, "sh", "-c", "mkdir -p /tmp/www && echo hi > /tmp/www/index.html && httpd -p 8080 -h /tmp/www")
+	require.NoError(t, err)
+	require.Equal(t, 0, start.ExitCode, "httpd must start before its host port can be tested: %s", start.Stderr)
 
 	// internal must not bind a host port: the connection must be refused for
 	// the full window (not merely "slow to come up").

@@ -10,13 +10,13 @@ import (
 	"os"
 	"sync"
 
-	"github.com/us/den/internal/engine"
+	"github.com/tmls-ai/guino/internal/engine"
 )
 
 const (
 	protocolVersion = "2024-11-05"
-	serverName      = "den"
-	serverVersion   = "0.0.2"
+	serverName      = "guino"
+	serverVersion   = "0.1.0"
 )
 
 // JSONRPCRequest represents an incoming JSON-RPC 2.0 request.

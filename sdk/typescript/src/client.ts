@@ -2,18 +2,18 @@ import type { ClientConfig } from "./types.js";
 import { SandboxManager } from "./sandbox.js";
 
 /**
- * Main entry point for the Den SDK.
+ * Main entry point for the Guino SDK.
  *
  * @example
  * ```ts
- * const client = new Den({ url: "http://localhost:8080", apiKey: "my-key" });
+ * const client = new Guino({ url: "http://localhost:8080", apiKey: "my-key" });
  * const sandbox = await client.sandbox.create({ image: "ubuntu:22.04" });
  * const result = await sandbox.exec(["echo", "hello"]);
  * console.log(result.stdout); // "hello\n"
  * await sandbox.destroy();
  * ```
  */
-export class Den {
+export class Guino {
   private readonly _sandbox: SandboxManager;
   private readonly baseUrl: string;
   private readonly headers: Record<string, string>;
@@ -36,7 +36,7 @@ export class Den {
   }
 
   /**
-   * Check if the Den server is healthy.
+   * Check if the Guino server is healthy.
    * @returns True if the server is reachable and healthy.
    */
   async health(): Promise<boolean> {
@@ -78,3 +78,6 @@ export class Den {
     }>;
   }
 }
+
+/** @deprecated Use Guino. This alias is retained for the 0.1.x transition. */
+export { Guino as Den };

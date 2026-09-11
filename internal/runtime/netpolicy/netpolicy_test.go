@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/us/den/internal/runtime"
-	"github.com/us/den/internal/runtime/netpolicy"
-	"github.com/us/den/internal/runtime/netpolicy/netpolicytest"
+	"github.com/tmls-ai/guino/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime/netpolicy"
+	"github.com/tmls-ai/guino/internal/runtime/netpolicy/netpolicytest"
 )
 
 // netpolicyTestFloor is the minimum number of suite tests that must execute.
@@ -411,10 +411,10 @@ func TestCommittedStringsStable(t *testing.T) {
 	// These substrings are part of the operator/security contract; the e2e
 	// script and integration matrix grep for them. A change here is a
 	// deliberate, test-breaking contract change.
-	assert.Contains(t, netpolicy.MsgBindRefusal, "den refuses to start")
+	assert.Contains(t, netpolicy.MsgBindRefusal, "guino refuses to start")
 	assert.Contains(t, netpolicy.MsgBindRefusal, "platform_override")
 	assert.Contains(t, netpolicy.MsgBindRefusal, "allow_unsafe_bind")
-	assert.Contains(t, netpolicy.MsgBridgeRefusal, "den refuses to start")
+	assert.Contains(t, netpolicy.MsgBridgeRefusal, "guino refuses to start")
 	assert.Contains(t, netpolicy.MsgBridgeRefusal, "allow_unsafe_bridge")
 	assert.Contains(t, netpolicy.MsgUnsafeBindEnabled, "SECURITY:")
 	assert.Contains(t, netpolicy.MsgPlatformOverrideAttested, "SECURITY:")

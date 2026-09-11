@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://us.github.io/den/sitemap.xml
+# Add a sitemap only after the Guino documentation hosting URL is verified.

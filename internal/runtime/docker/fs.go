@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/us/den/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime"
 )
 
 // ReadFile reads a file from the container using exec-based cat approach.
@@ -67,7 +67,9 @@ func (r *DockerRuntime) WriteFile(ctx context.Context, id string, path string, c
 // ListDir lists the contents of a directory in the container.
 func (r *DockerRuntime) ListDir(ctx context.Context, id string, path string) ([]runtime.FileInfo, error) {
 	result, err := r.Exec(ctx, id, runtime.ExecOpts{
-		Cmd: []string{"ls", "-la", "--time-style=full-iso", path},
+		// Both GNU coreutils and BusyBox support --full-time. The equivalent
+		// GNU-only --time-style flag breaks file listing and S3 cleanup on Alpine.
+		Cmd: []string{"ls", "-la", "--full-time", path},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("listing dir %s in %s: %w", path, id, err)

@@ -1,17 +1,25 @@
 # SDKs
 
-den provides official SDKs for Go, TypeScript, and Python.
+guino provides official SDKs for Go, TypeScript, and Python.
 
-| SDK | Package | Install |
-|-----|---------|---------|
-| Go | [`github.com/us/den`](https://pkg.go.dev/github.com/us/den) | `go get github.com/us/den@latest` |
-| TypeScript | [`@us4/den`](https://www.npmjs.com/package/@us4/den) | `bun add @us4/den` |
-| Python | [`den-sdk`](https://pypi.org/project/den-sdk/) | `uv add den-sdk` / `pip install den-sdk` |
+Published packages are pending. Use the SDKs from this checkout; registry availability alone does not establish publishing ownership.
+
+| SDK | Intended identity | Source setup |
+|-----|-------------------|--------------|
+| Go | `github.com/tmls-ai/guino/pkg/client` | Use the module in this checkout, or a local `replace` in a consuming Go module |
+| TypeScript | `@tmls-ai/guino` | [TypeScript source installation](../../sdk/typescript/README.md) |
+| Python | distribution `guino`, import `guino` | `python -m pip install ./sdk/python` from the repository root |
+
+The TypeScript/Python primary classes are `Guino`/`GuinoError`; deprecated `Den`/`DenError` aliases are retained through 0.1.x. Python also retains the old `den` import shim. The SDK package metadata retains its original MIT declarations; the runtime remains AGPL-3.0.
+
+The examples below assume [the API server](quick-start.md) is already running. They are usage fragments; handle errors and clean up resources in your application. Images must contain the invoked executable.
 
 ## Go SDK
 
+For a separate local application module, add `replace github.com/tmls-ai/guino => /absolute/path/to/guino` to its `go.mod`; replace the path with this checkout.
+
 ```go
-import client "github.com/us/den/pkg/client"
+import client "github.com/tmls-ai/guino/pkg/client"
 
 c := client.New("http://localhost:8080",
     client.WithAPIKey("your-api-key"),
@@ -19,7 +27,7 @@ c := client.New("http://localhost:8080",
 
 // Create sandbox (timeout in seconds)
 sb, _ := c.CreateSandbox(ctx, client.SandboxConfig{
-    Image:   "ubuntu:22.04",
+    Image:   "python:3.12-slim",
     Timeout: 1800, // 30 minutes
 })
 
@@ -39,6 +47,7 @@ restored, _ := c.RestoreSnapshot(ctx, snap.ID)
 
 // Cleanup
 c.DestroySandbox(ctx, sb.ID)
+c.DestroySandbox(ctx, restored.ID)
 ```
 
 ### Methods
@@ -60,16 +69,16 @@ c.DestroySandbox(ctx, sb.ID)
 ## TypeScript SDK
 
 ```typescript
-import { Den } from '@us4/den';
+import { Guino } from '@tmls-ai/guino';
 
-const den = new Den({
+const guino = new Guino({
   url: 'http://localhost:8080',
   apiKey: 'your-api-key',
 });
 
 // Create sandbox (timeout in seconds)
-const sandbox = await den.sandbox.create({
-  image: 'ubuntu:22.04',
+const sandbox = await guino.sandbox.create({
+  image: 'python:3.12-slim',
   timeout: 1800, // 30 minutes
 });
 
@@ -89,10 +98,10 @@ await sandbox.destroy();
 ## Python SDK
 
 ```python
-from den import Den
+from guino import Guino
 
 # Sync usage
-client = Den("http://localhost:8080", api_key="your-api-key")
+client = Guino("http://localhost:8080", api_key="your-api-key")
 
 sandbox = client.sandbox.create(image="ubuntu:22.04")
 result = sandbox.exec(["echo", "hello"])
@@ -106,10 +115,10 @@ client.close()
 
 ```python
 import asyncio
-from den import Den
+from guino import Guino
 
 async def main():
-    client = Den("http://localhost:8080", api_key="your-api-key")
+    client = Guino("http://localhost:8080", api_key="your-api-key")
 
     sandbox = await client.sandbox.acreate(image="ubuntu:22.04")
     result = await sandbox.aexec(["echo", "hello"])

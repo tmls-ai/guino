@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/us/den/internal/config"
-	"github.com/us/den/internal/pathutil"
-	"github.com/us/den/internal/runtime"
+	"github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/internal/pathutil"
+	"github.com/tmls-ai/guino/internal/runtime"
 )
 
 const (

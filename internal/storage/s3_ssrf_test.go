@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	serverconfig "github.com/us/den/internal/config"
-	"github.com/us/den/internal/runtime"
+	serverconfig "github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/internal/runtime"
 )
 
 // TestResolveS3Credentials_GateB_and_overrides pins the resolution matrix that

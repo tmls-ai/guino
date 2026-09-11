@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/us/den/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime"
 )
 
 var (

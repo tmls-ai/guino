@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/us/den/internal/config"
-	"github.com/us/den/internal/runtime/docker"
-	"github.com/us/den/internal/runtime/netpolicy"
+	"github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/internal/runtime/docker"
+	"github.com/tmls-ai/guino/internal/runtime/netpolicy"
 )
 
 // debugCmd groups low-level diagnostics that are not part of the normal
@@ -28,7 +28,7 @@ func debugCmd() *cobra.Command {
 // SAME probe production uses (realPlatformProbe → SystemInfo →
 // ClassifyPlatform). It loads config via the same --config/config.Load path as
 // `serve`, prints a machine-readable classification to stdout, and exits 0
-// ONLY when the platform is linux-native-docker (the den process is co-resident
+// ONLY when the platform is linux-native-docker (the Guino process is co-resident
 // with a native-Linux Docker daemon over a unix socket).
 //
 // This is the Go-truth gate CI uses to decide whether to run the positive

@@ -1,42 +1,62 @@
-# Contributing to Den
+# Contributing to Guino
 
-Thank you for your interest in contributing to Den! This guide will help you get started.
+Guino builds on Den with preserved history and attribution. Keep the local runtime useful without a cloud account, and keep migration changes on top of existing commits.
 
 ## Development Setup
 
 ### Prerequisites
 
-- Go 1.23+
+- Go 1.25.7+
 - Docker running locally
 - [golangci-lint](https://golangci-lint.run/usage/install/)
 
 ### Building from Source
 
 ```bash
-git clone https://github.com/us/den
-cd den
-go build -o den ./cmd/den
+# From this source checkout
+go build -o bin/guino ./cmd/guino
 ```
 
 ### Running Tests
 
 ```bash
 # Unit tests
-go test ./internal/... -short -v
+go test ./cmd/... ./internal/... ./pkg/... -short -v
 
 # With race detector
-go test ./internal/... -race -count=1 -v
+go test ./cmd/... ./internal/... ./pkg/... -race -count=1 -v
 
-# Integration tests (requires Docker)
-go test ./tests/integration/... -v
+# SDK dependencies, tests and package builds (requires Bun and uv)
+make test-sdk
 ```
+
+The Docker integration suite requires cached sandbox images and a seeded MinIO
+fixture. On a local test daemon, prepare them from the repository root:
+
+```bash
+docker pull busybox:latest
+docker pull alpine:latest
+docker compose -p guino-integration -f tests/integration/docker-compose.minio.yml up -d --wait minio
+docker compose -p guino-integration -f tests/integration/docker-compose.minio.yml run --rm createbuckets
+make test-integration
+# Remove only this suite's MinIO fixture when finished.
+docker compose -p guino-integration -f tests/integration/docker-compose.minio.yml down
+```
+
+The fixture publishes localhost ports 9000/9001; use an isolated test host if
+they are occupied. Set `MINIO_ENDPOINT` when using another seeded MinIO service.
+The full suite includes tests under both `internal/` and `tests/`. Host-published
+port tests require the test process to run on the Docker host. CI explicitly
+leaves those two proofs to the required `native-host` job when testing a remote
+Docker-in-Docker daemon. `make e2e-network` adds real CLI/API network checks;
+its positive native-Linux attestation leg cannot be verified on Docker Desktop.
 
 ### Running the Server
 
+Follow the [quickstart](docs/docs/quick-start.md) or prepare a configuration with deliberate authentication and network settings. Unconfigured `serve` is intentionally refused by its bind guard.
+
 ```bash
-./den serve
-# Or with custom config
-./den serve --config den.yaml
+./bin/guino serve --config guino.yaml
 ```
 
 ## Pull Request Process
@@ -44,7 +64,7 @@ go test ./tests/integration/... -v
 1. Fork the repository and create a feature branch from `main`
 2. Branch naming: `feat/description`, `fix/description`, `refactor/description`
 3. Write tests for new functionality
-4. Ensure all tests pass: `go test ./internal/... -race`
+4. Ensure all tests pass: `go test ./cmd/... ./internal/... ./pkg/... -race`
 5. Run the linter: `golangci-lint run`
 6. Commit using [Conventional Commits](https://www.conventionalcommits.org/):
    - `feat:` new features
@@ -67,7 +87,7 @@ go test ./tests/integration/... -v
 ## Project Structure
 
 ```
-cmd/den/          — CLI entry point and commands
+cmd/guino/          — CLI entry point and commands
 internal/
   api/            — HTTP handlers, middleware, WebSocket
   config/         — Configuration loading and validation
@@ -83,12 +103,20 @@ sdk/
   python/         — Python SDK
 ```
 
+## Migration and compatibility
+
+Keep historical commits, tags, authors and changelog entries unchanged. `den.db`, `den-net`, `den.*` ownership labels, and snapshot/volume prefixes are intentional compatibility identifiers. Guino 0.1.x retains documented legacy config/environment and SDK aliases; any later removal needs an announced migration path.
+
+Use source installs until release artifacts and package publishing are verified. Update CLI examples against actual `--help`; do not document placeholder cloud or MCP installation commands.
+
+For SDK changes, follow the source setup and checks in [TypeScript](sdk/typescript/README.md) and [Python](sdk/python/README.md). Match validation to the changed behavior and report checks that could not run. Docker-dependent tests require an isolated daemon: do not run destructive integration tests against a daemon holding valuable workloads.
+
 ## Reporting Issues
 
-- Use [GitHub Issues](https://github.com/us/den/issues) for bug reports and feature requests
-- Include Den version, OS, Docker version, and reproduction steps
+- Use [GitHub Issues](https://github.com/tmls-ai/guino/issues) for bug reports and feature requests
+- Include Guino version, OS, Docker version, and reproduction steps
 - For security vulnerabilities, see [SECURITY.md](SECURITY.md)
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the AGPL-3.0 License.
+Keep the applicable existing license for the files you change: the runtime is AGPL-3.0, and existing SDK package metadata declares MIT. Do not remove copyright notices or infer that this rename authorizes relicensing or transfers contributor IP. A future contributor agreement or commercial licensing policy requires a separate decision.

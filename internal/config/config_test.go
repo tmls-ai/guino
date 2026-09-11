@@ -16,7 +16,7 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, "0.0.0.0", cfg.Server.Host)
 	assert.Equal(t, 8080, cfg.Server.Port)
 	assert.Equal(t, "docker", cfg.Runtime.Backend)
-	assert.Equal(t, "den/default:latest", cfg.Sandbox.DefaultImage)
+	assert.Equal(t, "guino/default:latest", cfg.Sandbox.DefaultImage)
 	assert.Equal(t, 30*time.Minute, cfg.Sandbox.DefaultTimeout)
 	assert.Equal(t, 100, cfg.Sandbox.MaxSandboxes)
 	assert.Equal(t, "den.db", cfg.Store.Path)

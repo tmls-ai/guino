@@ -1,16 +1,27 @@
 name: CI
 
 on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: false
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
@@ -22,8 +33,8 @@ jobs:
       # plane. These are precise go/parser checks (NOT greps — a grep would
       # false-match the legitimate allow_unsafe_bridge identifier), kept in
       # the no-Docker lint job so they gate every PR.
-      - name: cmd/den hardening invariants (unsafe / //go:linkname)
-        run: go test ./cmd/den/ -run TestCmdDenHardening -v
+      - name: cmd/guino hardening invariants (unsafe / //go:linkname)
+        run: go test ./cmd/guino/ -run TestCmdGuinoHardening -v
       # Relocated out of the Docker-bound integration-test job so it gates
       # EVERY PR with no daemon dependency, and widened to also scan
       # internal/**: integration-tagged tests now live there too (the SSRF /
@@ -71,15 +82,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
       - name: Run unit tests
-        # ./cmd/den/... carries the hermetic bind-guard / platform_override
+        # ./cmd/guino/... carries the hermetic bind-guard / platform_override
         # proofs and the named-proof floor; it MUST be in the unit line (the
         # integration `-run TestIntegration` line would silently never match
         # them). Not added to the integration line — see SECURITY plan.
-        run: go test ./cmd/den/... ./internal/... -short -v -race
+        run: go test ./cmd/guino/... ./internal/... ./pkg/... -short -v -race
 
   build:
     runs-on: ubuntu-latest
@@ -90,6 +103,8 @@ jobs:
         goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
@@ -98,12 +113,12 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-        run: go build -o den-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/den
+        run: go build -o guino-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/guino
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: den-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: den-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: guino-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: guino-${{ matrix.goos }}-${{ matrix.goarch }}
 
   # v9 single CI topology: the job runs inside a container so the `docker`
   # service-network alias resolves, giving the Go Docker SDK a TLS-free daemon
@@ -116,6 +131,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test]
     container: golang:1.25
+    defaults:
+      run:
+        shell: bash
     services:
       docker:
         image: docker:dind
@@ -124,8 +142,11 @@ jobs:
           DOCKER_TLS_CERTDIR: ""
     env:
       DOCKER_HOST: tcp://docker:2375
+      MINIO_ENDPOINT: http://docker:9000
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - name: Install docker CLI
         run: |
           apt-get update -qq
@@ -144,18 +165,45 @@ jobs:
           done
           echo "::error::Docker daemon unreachable at $DOCKER_HOST after 60s"
           exit 1
+      - name: Prepare sandbox images and S3 fixture
+        run: |
+          set -euo pipefail
+          docker pull busybox:latest
+          docker pull alpine:latest
+          docker network create guino-ci-minio
+          docker run -d --name guino-ci-minio --network guino-ci-minio \
+            --network-alias minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            if docker run --rm --network guino-ci-minio --entrypoint /bin/sh \
+                minio/mc:latest -c 'mc alias set m http://minio:9000 minioadmin minioadmin && mc ready m'; then
+              break
+            fi
+            test "$i" -lt 30 || { echo 'MinIO failed to become ready'; exit 1; }
+            sleep 2
+          done
+          docker run --rm --network guino-ci-minio --entrypoint /bin/sh minio/mc:latest -c \
+            "mc alias set m http://minio:9000 minioadmin minioadmin && \
+             mc mb m/test-bucket && mc anonymous set public m/test-bucket && \
+             echo 'hello from s3' | mc pipe m/test-bucket/test-data/hello.txt"
       # The build-tag + naming meta-check now lives in the daemon-free `lint`
       # job (gates every PR, scans internal/** too). This job keeps only the
       # runtime min-test-count gate, which needs a real test run.
       - name: Run integration tests (with min-test-count gate)
         run: |
           set -euo pipefail
+          # Docker publishes on the service container's loopback, not this
+          # runner's. Both positive and negative host-port proofs are mandatory
+          # in native-host below; neither can be proven by this remote daemon.
+          native_only='^(TestIntegration_Network_BridgePublishedPortReachable|TestIntegration_Network_InternalNoHostPublish)$'
           expected=$(grep -rhoE '^func (TestIntegration_[A-Za-z0-9_]+)\(' \
             tests/integration internal 2>/dev/null \
-            | awk '{print $2}' | sed 's/($//' | sort -u | wc -l | tr -d ' ')
+            | awk '{print $2}' | sed 's/($//' | sort -u \
+            | grep -Ev "$native_only" | wc -l | tr -d ' ')
           echo "Expecting at least $expected TestIntegration_ top-level test(s)"
           go test -tags integration ./internal/... ./tests/... \
-            -run TestIntegration -v 2>&1 | tee /tmp/itest.out
+            -run TestIntegration -skip "$native_only" -v 2>&1 | tee /tmp/itest.out
           ran=$(grep -cE '^=== RUN   TestIntegration_[A-Za-z0-9_]+$' /tmp/itest.out || true)
           echo "Ran $ran top-level TestIntegration_ test(s)"
           if [ "$ran" -lt "$expected" ] || [ "$ran" -eq 0 ]; then
@@ -178,6 +226,8 @@ jobs:
     needs: [test]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
@@ -199,6 +249,8 @@ jobs:
       - name: Start + seed MinIO on a discovered RFC1918 bridge IP
         run: |
           set -euo pipefail
+          docker pull busybox:latest
+          docker pull alpine:latest
           docker network create den-minio-net >/dev/null
           docker run -d --name den-minio \
             --network den-minio-net --network-alias minio \
@@ -249,10 +301,14 @@ jobs:
             echo "::error::min-test-count gate failed: ran=$ran expected>=$expected"
             exit 1
           fi
+          for proof in TestIntegration_Network_BridgePublishedPortReachable TestIntegration_Network_InternalNoHostPublish; do
+            grep -Fq -- "--- PASS: $proof " /tmp/itest-native.out \
+              || { echo "::error::$proof must PASS on native-host"; exit 1; }
+          done
 
       - name: e2e network proof — Leg D MUST execute (not SKIP)
         env:
-          DEN_E2E_LOCAL_NATIVE: "1"
+          GUINO_E2E_LOCAL_NATIVE: "1"
         run: |
           set -euo pipefail
           bash scripts/e2e-network.sh 2>&1 | tee /tmp/e2e-native.out
@@ -264,7 +320,7 @@ jobs:
             grep -nE '^(== Leg D|  SKIP:)' /tmp/e2e-native.out || true
             exit 1
           fi
-          grep -Fq 'PASS: den STARTED with attested platform_override' /tmp/e2e-native.out \
+          grep -Fq 'PASS: guino STARTED with attested platform_override' /tmp/e2e-native.out \
             || { echo "::error::Leg D did not report the positive-override PASS"; exit 1; }
           grep -Fq 'PASS: exact committed MsgPlatformOverrideAttested literal logged' \
             /tmp/e2e-native.out \
@@ -273,26 +329,40 @@ jobs:
 
   sdk-test:
     runs-on: ubuntu-latest
-    needs: [integration-test]
+    needs: [test]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: oven-sh/setup-bun@v2
       - uses: astral-sh/setup-uv@v5
       - name: TypeScript SDK tests
         working-directory: sdk/typescript
         run: |
-          bun install
-          if compgen -G "**/*.test.ts" > /dev/null || compgen -G "**/*.spec.ts" > /dev/null; then
-            bun test
-          else
-            echo "No test files found, skipping"
-          fi
+          bun install --frozen-lockfile
+          bun test
+          bun run typecheck
+          bun run build
       - name: Python SDK tests
         working-directory: sdk/python
         run: |
-          uv sync --extra dev
-          if find . -type f \( -name "test_*.py" -o -name "*_test.py" \) -not -path './.venv/*' | grep -q .; then
-            uv run python -m pytest
-          else
-            echo "No test files found, skipping"
-          fi
+          uv sync --frozen --extra dev
+          uv run python -m pytest
+          uv build
+
+  release-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Installer regression tests
+        run: python3 -m unittest discover -s scripts/tests -v
+      - name: Check GoReleaser config
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: check

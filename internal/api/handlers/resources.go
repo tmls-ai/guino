@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"runtime"
 
-	denruntime "github.com/us/den/internal/engine"
+	denruntime "github.com/tmls-ai/guino/internal/engine"
 )
 
 // ResourceHandler handles resource status endpoints.

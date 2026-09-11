@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,7 +15,7 @@ import (
 	"github.com/knadh/koanf/v2"
 )
 
-// Config holds all configuration for the den server.
+// Config holds all configuration for the Guino server.
 type Config struct {
 	Server   ServerConfig   `koanf:"server"`
 	Runtime  RuntimeConfig  `koanf:"runtime"`
@@ -109,7 +111,7 @@ type S3Config struct {
 	// loopback/RFC1918/CGNAT reachability (self-hosted MinIO), pinned to its
 	// construction-time IP set. Default false: the SSRF guard blocks all
 	// internal ranges. Metadata/link-local/multicast/unspecified are NEVER
-	// reachable regardless of this flag. Env: DEN_S3__ALLOW_INTERNAL_ENDPOINT.
+	// reachable regardless of this flag. Env: GUINO_S3__ALLOW_INTERNAL_ENDPOINT.
 	AllowInternalEndpoint bool `koanf:"allow_internal_endpoint"`
 }
 
@@ -160,12 +162,13 @@ func DefaultConfig() *Config {
 			RateLimitBurst: 20,
 		},
 		Runtime: RuntimeConfig{
-			Backend:            "docker",
+			Backend: "docker",
+			// Retain Den's persisted network identity during the rename.
 			NetworkID:          "den-net",
 			DefaultNetworkMode: "internal",
 		},
 		Sandbox: SandboxConfig{
-			DefaultImage:         "den/default:latest",
+			DefaultImage:         "guino/default:latest",
 			DefaultTimeout:       30 * time.Minute,
 			MaxSandboxes:         100,
 			DefaultCPU:           0, // 0 = no limit, shared across all containers
@@ -189,6 +192,7 @@ func DefaultConfig() *Config {
 			Region: "us-east-1",
 		},
 		Store: StoreConfig{
+			// Keep existing state discoverable; do not create an empty Guino database.
 			Path: "den.db",
 		},
 		Auth: AuthConfig{
@@ -335,28 +339,66 @@ func (c *Config) Warnings() []string {
 	return w
 }
 
-// Load reads configuration from a YAML file and environment variables.
-// Environment variables are prefixed with DEN_ and use __ as separator.
-// For example: DEN_SERVER__PORT=9090
+// Env reads a Guino environment variable by suffix (for example, "API_KEY").
+// DEN_ aliases remain supported through 0.1.x. An explicitly set GUINO_ value,
+// including an empty value, always wins. Warnings never include secret values.
+func Env(suffix string) string {
+	if value, ok := os.LookupEnv("GUINO_" + suffix); ok {
+		return value
+	}
+	if value, ok := os.LookupEnv("DEN_" + suffix); ok {
+		warnLegacyEnv("DEN_" + suffix)
+		return value
+	}
+	return ""
+}
+
+func warnLegacyEnv(name string) {
+	_, _ = fmt.Fprintf(os.Stderr, "Warning: %s is deprecated; use GUINO_%s. DEN_ aliases are supported through 0.1.x.\n", name, strings.TrimPrefix(name, "DEN_"))
+}
+
+// Load reads a YAML file and environment variables. With no explicit path,
+// guino.yaml is preferred over the deprecated den.yaml fallback. GUINO_ variables
+// override DEN_ aliases, which override file settings. Use __ as the nesting
+// separator, for example GUINO_SERVER__PORT=9090. Compatibility warnings go to
+// stderr so loading configuration cannot corrupt an MCP stdio stream.
 func Load(path string) (*Config, error) {
 	k := koanf.New(".")
 	cfg := DefaultConfig()
+
+	if path == "" {
+		for _, candidate := range []string{"guino.yaml", "den.yaml"} {
+			if _, err := os.Stat(candidate); err == nil {
+				path = candidate
+				break
+			} else if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("checking config file %s: %w", candidate, err)
+			}
+		}
+	}
 
 	// Load from YAML file if provided
 	if path != "" {
 		if err := k.Load(file.Provider(path), yaml.Parser()); err != nil {
 			return nil, fmt.Errorf("loading config file %s: %w", path, err)
 		}
+		if filepath.Base(path) == "den.yaml" {
+			_, _ = fmt.Fprintln(os.Stderr, "Warning: den.yaml is deprecated; rename it to guino.yaml. The fallback is supported through 0.1.x.")
+		}
 	}
 
-	// Load from environment variables (override file settings)
-	if err := k.Load(env.Provider("DEN_", ".", func(s string) string {
-		return strings.ReplaceAll(
-			strings.ToLower(strings.TrimPrefix(s, "DEN_")),
-			"__", ".",
-		)
-	}), nil); err != nil {
-		return nil, fmt.Errorf("loading env config: %w", err)
+	// The second overlay wins even when its value is explicitly empty.
+	for _, prefix := range []string{"DEN_", "GUINO_"} {
+		if err := k.Load(env.Provider(prefix, ".", func(name string) string {
+			if prefix == "DEN_" {
+				if _, present := os.LookupEnv("GUINO_" + strings.TrimPrefix(name, "DEN_")); !present {
+					warnLegacyEnv(name)
+				}
+			}
+			return strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(name, prefix)), "__", ".")
+		}), nil); err != nil {
+			return nil, fmt.Errorf("loading env config: %w", err)
+		}
 	}
 
 	if err := k.Unmarshal("", cfg); err != nil {

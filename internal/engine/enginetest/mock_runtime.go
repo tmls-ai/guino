@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/us/den/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime"
 )
 
 // MockRuntime implements runtime.Runtime for testing.

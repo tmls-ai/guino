@@ -1,26 +1,26 @@
-BINARY := den
+BINARY := guino
 VERSION ?= dev
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)"
 
-.PHONY: build test test-integration test-sdk e2e-network lint clean dashboard release docker
+.PHONY: build test test-integration test-sdk e2e-network lint clean dashboard release release-check install docker
 
 build:
-	CGO_ENABLED=0 go build $(LDFLAGS) -o bin/$(BINARY) ./cmd/den
+	CGO_ENABLED=0 go build $(LDFLAGS) -o bin/$(BINARY) ./cmd/guino
 
 test:
-	go test ./cmd/den/... ./internal/... -short -v
+	go test ./cmd/guino/... ./internal/... ./pkg/... -short -v
 
 test-integration:
 	go test -tags integration ./internal/... ./tests/... -run TestIntegration -v
 
 test-sdk:
-	cd sdk/typescript && bun test
-	cd sdk/python && uv run python -m pytest
+	cd sdk/typescript && bun install --frozen-lockfile && bun test && bun run typecheck && bun run build
+	cd sdk/python && uv sync --frozen --extra dev && uv run python -m pytest && uv build
 
-# Machine-checkable end-to-end network proof (real den binary + real Docker).
-# Set DEN_E2E_LOCAL_NATIVE=1 ONLY on native co-resident Linux for leg D.
+# Machine-checkable end-to-end network proof (real guino binary + real Docker).
+# Set GUINO_E2E_LOCAL_NATIVE=1 ONLY on native co-resident Linux for leg D.
 e2e-network:
 	./scripts/e2e-network.sh
 
@@ -45,13 +45,19 @@ clean:
 	rm -rf bin/ internal/dashboard/dist/*.js internal/dashboard/dist/*.css
 
 release:
-	goreleaser release --clean
+	goreleaser release --snapshot --clean --skip=publish
 
-docker:
-	docker build -t den/den:latest .
+release-check:
+	python3 scripts/check-release.py --tag v0.1.0
+	goreleaser check
+
+install:
+	go install ./cmd/guino
+
+docker: docker-image
 
 docker-image:
-	docker build -t den/default:latest images/default/
+	docker build -t guino/default:latest images/default/
 
 run: build
 	./bin/$(BINARY) serve

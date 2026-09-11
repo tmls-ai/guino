@@ -15,14 +15,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/us/den/internal/config"
-	"github.com/us/den/internal/engine"
-	"github.com/us/den/internal/runtime"
-	"github.com/us/den/internal/runtime/docker"
-	"github.com/us/den/internal/runtime/netpolicy"
-	"github.com/us/den/internal/security/ssrf"
-	"github.com/us/den/internal/storage"
-	"github.com/us/den/internal/store"
+	"github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/internal/engine"
+	"github.com/tmls-ai/guino/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime/docker"
+	"github.com/tmls-ai/guino/internal/runtime/netpolicy"
+	"github.com/tmls-ai/guino/internal/security/ssrf"
+	"github.com/tmls-ai/guino/internal/storage"
+	"github.com/tmls-ai/guino/internal/store"
 )
 
 func getMinIOEndpoint() string {
@@ -333,6 +333,23 @@ func TestIntegration_S3Hooks(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.ExitCode)
 	assert.Contains(t, result.Stdout, "hello from s3")
+
+	// Destruction runs the upload hook. Its errors are logged, so checking
+	// DestroySandbox alone would incorrectly pass when cleanup loses files.
+	content := []byte("Guino cleanup uploaded this file")
+	outputName := "hook-output-" + sb.ID + ".txt"
+	require.NoError(t, eng.WriteFile(ctx, sb.ID, "/home/sandbox/"+outputName, content))
+	require.NoError(t, eng.DestroySandbox(ctx, sb.ID))
+	creds, err := storage.ResolveS3Credentials(sb.Config.Storage.S3, s3Cfg)
+	require.NoError(t, err)
+	client, err := storage.NewS3Client(ctx, creds, slog.Default())
+	require.NoError(t, err)
+	body, _, err := client.Download(ctx, "test-bucket", "test-data/"+outputName)
+	require.NoError(t, err, "cleanup must upload under the normal prefix, without a double slash")
+	defer body.Close()
+	uploaded, err := io.ReadAll(body)
+	require.NoError(t, err)
+	assert.Equal(t, content, uploaded)
 }
 
 // endpointResolvesInternal reports whether the test MinIO endpoint resolves to

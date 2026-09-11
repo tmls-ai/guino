@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a reproducible Guino problem.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: "For vulnerabilities, follow SECURITY.md; do not include exploit details or secrets here."
+  - type: input
+    id: version
+    attributes:
+      label: Guino version or commit
+      description: Include the output of guino version, or the source commit.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Docker version/topology, network mode, CLI/SDK/MCP client and relevant sanitized settings.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove keys, tokens, credentials and private file content.

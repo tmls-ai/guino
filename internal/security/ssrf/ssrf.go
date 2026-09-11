@@ -1,4 +1,4 @@
-// Package ssrf is the single home for den's SSRF defenses around the
+// Package ssrf is the single home for Guino's SSRF defenses around the
 // operator-configured S3 endpoint. It is deliberately stdlib-only: importing
 // internal/config here would create an import cycle (config.Validate must stay
 // a leaf), so the exemption predicate takes primitives, never config types.
@@ -6,7 +6,7 @@
 // config into those primitives at the call boundary.
 //
 // Threat model: a sandbox (or a sandbox-influenced request) must not be able
-// to make den connect to internal infrastructure — cloud metadata, link-local,
+// to make Guino connect to internal infrastructure — cloud metadata, link-local,
 // loopback, RFC1918, CGNAT — via a crafted endpoint or a DNS rebind. The
 // default posture blocks every such range. The operator may opt a SINGLE
 // configured endpoint back in (self-hosted MinIO on localhost/LAN) via

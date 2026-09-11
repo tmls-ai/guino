@@ -260,6 +260,18 @@ async function loadPage(slug) {
     if (!response.ok) throw new Error("Not found");
     const md = await response.text();
     article.innerHTML = parseMarkdown(md);
+    // Markdown links are relative to docs/<slug>.md, not index.html.
+    // Keep sibling documentation pages in the router and rebase other files.
+    const documentUrl = new URL(`docs/${slug}.md`, window.location.href);
+    const pageSlugs = new Set(config.sidebar.flatMap(section => section.children.map(page => page.slug)));
+    article.querySelectorAll("a[href]").forEach(link => {
+      const href = link.getAttribute("href");
+      if (!href || href.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(href)) return;
+      const sibling = href.match(/^([a-z0-9-]+)\.md$/);
+      link.href = sibling && pageSlugs.has(sibling[1])
+        ? `#${sibling[1]}`
+        : new URL(href, documentUrl).href;
+    });
   } catch {
     article.innerHTML = `
       <h1>Page Not Found</h1>

@@ -1,5 +1,7 @@
 # REST API
 
+S3/MinIO examples assume the operator has configured a trusted server-side `s3.endpoint`, credentials and `s3.allow_internal_endpoint: true` when that endpoint is private. Requests omit `endpoint` to inherit the configured endpoint: per-request overrides are refused while that exemption is active.
+
 All endpoints are served under `/api/v1/`. Responses are JSON unless otherwise noted.
 
 ## Authentication
@@ -46,7 +48,6 @@ POST /api/v1/sandboxes
       {"path": "/tmp", "size": "128m", "options": "rw,noexec,nosuid"}
     ],
     "s3": {
-      "endpoint": "http://minio:9000",
       "bucket": "my-bucket",
       "prefix": "sandbox-data/",
       "access_key": "minioadmin",
@@ -60,12 +61,12 @@ POST /api/v1/sandboxes
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `image` | string | `ubuntu:22.04` | Docker image |
+| `image` | string | `guino/default:latest` | Docker image |
 | `env` | object | `{}` | Environment variables |
 | `workdir` | string | `""` | Working directory |
 | `timeout` | int | `1800` | Auto-expiry in seconds (30 min) |
-| `cpu` | int | `1000000000` | CPU in NanoCPUs (1e9 = 1 core) |
-| `memory` | int | `536870912` | Memory in bytes (512MB) |
+| `cpu` | int | `0` | CPU in NanoCPUs (1e9 = 1 core) |
+| `memory` | int | `0` | Memory in bytes; default 0 means unlimited |
 | `ports` | array | `[]` | Port mappings (`host_port: 0` for auto-assign) |
 | `storage` | object | `null` | Storage configuration (see below) |
 
@@ -210,7 +211,6 @@ POST /api/v1/sandboxes/{id}/files/s3-import
   "bucket": "my-bucket",
   "key": "data/input.csv",
   "dest_path": "/home/sandbox/input.csv",
-  "endpoint": "http://minio:9000",
   "access_key": "minioadmin",
   "secret_key": "minioadmin"
 }

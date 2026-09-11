@@ -18,9 +18,9 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 
-	"github.com/us/den/internal/runtime"
-	"github.com/us/den/internal/storage"
-	"github.com/us/den/internal/store"
+	"github.com/tmls-ai/guino/internal/runtime"
+	"github.com/tmls-ai/guino/internal/storage"
+	"github.com/tmls-ai/guino/internal/store"
 
 	dockermount "github.com/docker/docker/api/types/mount"
 )
@@ -85,7 +85,7 @@ func WithReconcileNetwork(enabled bool) Option {
 }
 
 // WithAllowUnsafeBridge records the bridge opt-in (used by reconcile/EnsureNetwork
-// bookkeeping; the fatal bridge-refusal guard itself lives in cmd/den).
+// bookkeeping; the fatal bridge-refusal guard itself lives in cmd/guino).
 func WithAllowUnsafeBridge(allowed bool) Option {
 	return func(r *DockerRuntime) {
 		r.allowUnsafeBridge = allowed
@@ -144,7 +144,7 @@ func (r *DockerRuntime) NetworkMode() runtime.NetworkMode {
 	return r.networkMode
 }
 
-// EnsureNetwork creates the den Docker network if it doesn't exist.
+// EnsureNetwork creates the Guino Docker network if it doesn't exist.
 //
 // Mode-aware:
 //   - none:     no-op (none sandboxes use empty EndpointsConfig; no managed
@@ -234,7 +234,7 @@ func (r *DockerRuntime) createManagedNetwork(ctx context.Context, mode runtime.N
 //     daemon-backstopped), and PortBindings + ExposedPorts are BOTH cleared.
 //   - internal / bridge:  attached to networkID.
 //
-// Den-set den.id/den.created labels are applied AFTER the caller label loop so
+// Guino-set den.id/den.created labels are applied AFTER the caller label loop so
 // a caller can never spoof them (the validator also strips caller den.*).
 func buildContainerCreateSpec(id string, cfg runtime.SandboxConfig, networkID string, mode runtime.NetworkMode) (*container.Config, *container.HostConfig, *network.NetworkingConfig, error) {
 	if mode == "" {
@@ -424,7 +424,7 @@ func (r *DockerRuntime) assertNoNetwork(ctx context.Context, id, containerName s
 		"container was attached to a network despite none mode (force-removed)", id)
 }
 
-// networkStale reports whether an existing den network's posture deviates from
+// networkStale reports whether an existing Guino network's posture deviates from
 // the desired mode. v9 predicate: ANY-deviation (OR, never AND) so an operator
 // internal→bridge migration (Internal flips) is correctly detected — the v8
 // AND-joined predicate missed this and left port-forwarding broken. Each
@@ -448,7 +448,7 @@ func (r *DockerRuntime) networkStale(insp network.Inspect, desired runtime.Netwo
 	return false
 }
 
-// Reconcile brings the managed den network into agreement with the configured
+// Reconcile brings the managed Guino network into agreement with the configured
 // default network mode after an operator-initiated mode change. It is
 // spoof-resistant and store-fail-closed: it NEVER mutates a network it cannot
 // prove it owns, and any sandbox-store read failure fails closed BEFORE any
@@ -460,8 +460,8 @@ func (r *DockerRuntime) networkStale(insp network.Inspect, desired runtime.Netwo
 //   - A stale network is destroyed+recreated ONLY when all three ownership
 //     signals hold (den.managed=true LABEL — never name-only — AND every
 //     attached container is name-prefixed den-<id> with the authoritative
-//     den.id label AND present in Den's store) AND runtime.reconcile_network
-//     (DEN_RUNTIME__RECONCILE_NETWORK) is true. Otherwise a typed actionable
+//     den.id label AND present in Guino's store) AND runtime.reconcile_network
+//     (GUINO_RUNTIME__RECONCILE_NETWORK) is true. Otherwise a typed actionable
 //     error is returned and nothing is touched. Disconnected sandboxes are
 //     NOT auto-restarted.
 //
@@ -495,8 +495,8 @@ func (r *DockerRuntime) Reconcile(ctx context.Context, st store.Store) error {
 	// Stale. Ownership signal #1: den.managed=true LABEL (never name-only — a
 	// configured network_id can collide with an operator-owned network).
 	if insp.Labels[labelNetManaged] != "true" {
-		return fmt.Errorf("network %s is stale for mode %s but is NOT den-managed "+
-			"(missing %s=true label): refusing to mutate a network Den does not own — "+
+		return fmt.Errorf("network %s is stale for mode %s but is NOT Guino-managed "+
+			"(missing %s=true label): refusing to mutate a network Guino does not own — "+
 			"change runtime.network_id or remove the conflicting network manually",
 			r.networkID, mode, labelNetManaged)
 	}
@@ -512,14 +512,14 @@ func (r *DockerRuntime) Reconcile(ctx context.Context, st store.Store) error {
 		known[rec.ID] = true
 	}
 
-	// Ownership signals #2/#3: every attached container is a Den sandbox by
+	// Ownership signals #2/#3: every attached container is a Guino sandbox by
 	// name-prefix AND authoritative den.id label AND present in the store.
 	type attached struct{ id, name string }
 	var toDisconnect []attached
 	for ctrID, ep := range insp.Containers {
 		name := strings.TrimPrefix(ep.Name, "/")
 		if !strings.HasPrefix(name, "den-") {
-			return fmt.Errorf("network %s has a non-Den container %q attached: "+
+			return fmt.Errorf("network %s has a non-Guino container %q attached: "+
 				"refusing destructive reconcile (ownership unverifiable)", r.networkID, name)
 		}
 		sbID := strings.TrimPrefix(name, "den-")
@@ -532,16 +532,16 @@ func (r *DockerRuntime) Reconcile(ctx context.Context, st store.Store) error {
 				"refusing destructive reconcile", name, labelID, sbID)
 		}
 		if !known[sbID] {
-			return fmt.Errorf("attached sandbox %s is not present in Den's store: "+
+			return fmt.Errorf("attached sandbox %s is not present in Guino's store: "+
 				"refusing destructive reconcile (ownership unverifiable)", sbID)
 		}
 		toDisconnect = append(toDisconnect, attached{ctrID, name})
 	}
 
 	if !r.reconcileNetwork {
-		return fmt.Errorf("network %s is den-managed but stale for mode %s; destructive "+
+		return fmt.Errorf("network %s is Guino-managed but stale for mode %s; destructive "+
 			"reconcile is OFF — set runtime.reconcile_network=true "+
-			"(DEN_RUNTIME__RECONCILE_NETWORK=true) to recreate it (this stops and "+
+			"(GUINO_RUNTIME__RECONCILE_NETWORK=true) to recreate it (this stops and "+
 			"disconnects %d attached sandbox(es), which are NOT auto-restarted)",
 			r.networkID, mode, len(toDisconnect))
 	}
@@ -672,7 +672,7 @@ func (r *DockerRuntime) Info(ctx context.Context, id string) (*runtime.SandboxIn
 	}, nil
 }
 
-// List returns all den-managed containers.
+// List returns all Guino-managed containers.
 func (r *DockerRuntime) List(ctx context.Context) ([]runtime.SandboxInfo, error) {
 	containers, err := r.cli.ContainerList(ctx, container.ListOptions{
 		All:     true,

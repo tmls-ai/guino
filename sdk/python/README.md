@@ -1,30 +1,31 @@
-# den-sdk
+# guino
 
-Python SDK for [Den](https://github.com/us/den) — the self-hosted sandbox runtime for AI agents.
+Python SDK for [Guino](https://github.com/tmls-ai/guino) — the self-hosted sandbox runtime for AI agents.
 
-> **100 sandboxes on E2B = ~$600/hour. 100 sandboxes on Den = one $5/month server.**
 
 ## Installation
 
+The intended distribution name is `guino`, with Python imports from `guino`.
+It is not published as part of this migration. Install from a local Guino
+checkout:
+
 ```bash
-pip install den-sdk
-# or
-uv add den-sdk
+python -m pip install ./sdk/python
 ```
 
 ## Quick Start
 
 ```python
-from den import Den
+from guino import Guino
 
-client = Den("http://localhost:8080", api_key="your-key")
+client = Guino("http://localhost:8080", api_key="your-key")
 
 # Create a sandbox
-sandbox = client.sandbox.create(image="ubuntu:22.04")
+sandbox = client.sandbox.create(image="python:3.12-slim")
 
 # Execute a command
-result = sandbox.exec(["python3", "-c", "print('Hello from Den!')"])
-print(result.stdout)  # Hello from Den!
+result = sandbox.exec(["python3", "-c", "print('Hello from Guino!')"])
+print(result.stdout)  # Hello from Guino!
 
 # Read/write files
 sandbox.write_file("/tmp/hello.py", "print('hello world')")
@@ -41,10 +42,10 @@ sandbox.destroy()
 
 ```python
 import asyncio
-from den import Den
+from guino import Guino
 
 async def main():
-    client = Den("http://localhost:8080", api_key="your-key")
+    client = Guino("http://localhost:8080", api_key="your-key")
 
     sandbox = await client.sandbox.acreate(image="ubuntu:22.04")
     result = await sandbox.aexec(["echo", "async works!"])
@@ -57,9 +58,9 @@ asyncio.run(main())
 ## Storage
 
 ```python
-from den import Den, StorageConfig, VolumeMount
+from guino import Guino, StorageConfig, VolumeMount
 
-client = Den("http://localhost:8080")
+client = Guino("http://localhost:8080")
 
 # Persistent volume
 sandbox = client.sandbox.create(
@@ -107,11 +108,23 @@ stats = sandbox.stats()
 - Async support via `httpx`
 - Type-safe with Pydantic models
 
+## Migrating from Den
+
+Use `from guino import Guino, GuinoError`. The deprecated `Den` and `DenError`
+names remain exact aliases during 0.1.x. Imports from `den`, `den.client`,
+`den.exceptions`, `den.sandbox`, and `den.types` also remain available in the
+new distribution. Uninstall `den-sdk` before installing Guino in the same
+environment because both distributions provide the compatibility `den` package.
+HTTP routes, authentication headers, and sandbox behavior are unchanged.
+
 ## Requirements
 
 - Python >= 3.10
-- Den server running (see [Den repo](https://github.com/us/den))
+- Guino server running (see [Guino repo](https://github.com/tmls-ai/guino))
 
-## License
+## License and origin
 
-MIT
+This SDK preserves the MIT designation in its upstream Den package metadata.
+The Guino runtime repository retains its [AGPL-3.0 license](../../LICENSE).
+Guino continues the original [Den project](https://github.com/us/den); the rename
+does not change the SDK license metadata or the project’s history and authorship.

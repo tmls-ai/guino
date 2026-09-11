@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "den-sdk"
+name = "guino"
 version = "0.1.0"
-description = "Python SDK for the Den sandbox API"
+description = "Python SDK for the Guino sandbox API"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
-keywords = ["den", "sandbox", "sdk", "docker", "ai", "code-execution"]
+keywords = ["guino", "sandbox", "sdk", "docker", "ai", "code-execution"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -28,10 +28,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/us/den"
-Repository = "https://github.com/us/den"
-Documentation = "https://github.com/us/den/tree/main/sdk/python"
-Issues = "https://github.com/us/den/issues"
+Homepage = "https://github.com/tmls-ai/guino"
+Repository = "https://github.com/tmls-ai/guino"
+Documentation = "https://github.com/tmls-ai/guino/tree/main/sdk/python"
+Issues = "https://github.com/tmls-ai/guino/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -42,7 +42,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/den"]
+packages = ["src/guino", "src/den"]
 
 [tool.ruff]
 target-version = "py310"

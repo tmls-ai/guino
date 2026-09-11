@@ -1,8 +1,14 @@
 # Configuration
 
-Configuration merges in order: **defaults → YAML file → environment variables**.
+Configuration merges in order: **defaults → YAML file → legacy `DEN_*` variables → `GUINO_*` variables**.
 
-## den.yaml
+An explicit `--config` selects a file. Without it, `guino.yaml` in the working directory is preferred, with deprecated `den.yaml` fallback through Guino 0.1.x. New environment names take precedence even when explicitly empty. Legacy use emits a warning to stderr.
+
+The YAML below is a configuration reference with example limits, not a ready-to-run deployment: `0.0.0.0`, auth off and `internal` networking are refused by the bind guard. Use the [quickstart](quick-start.md) for a working local setup. Runtime defaults are `guino/default:latest`, 100 sandboxes, and CPU/memory limits of 0 (unlimited). Build the default image locally or choose an available image.
+
+Persisted names `den.db` and `den-net` remain unchanged for compatibility. Do not rename them merely to remove old branding.
+
+## guino.yaml
 
 ```yaml
 server:
@@ -81,28 +87,28 @@ log:
 
 ## Environment Variables
 
-Prefix `DEN_` with `__` as nesting separator:
+Prefix `GUINO_` with `__` as nesting separator:
 
 | Config | Environment Variable |
 |--------|---------------------|
-| `server.port` | `DEN_SERVER__PORT` |
-| `server.host` | `DEN_SERVER__HOST` |
-| `sandbox.default_image` | `DEN_SANDBOX__DEFAULT_IMAGE` |
-| `sandbox.default_timeout` | `DEN_SANDBOX__DEFAULT_TIMEOUT` |
-| `sandbox.max_sandboxes` | `DEN_SANDBOX__MAX_SANDBOXES` |
-| `sandbox.default_memory` | `DEN_SANDBOX__DEFAULT_MEMORY` |
-| `sandbox.default_cpu` | `DEN_SANDBOX__DEFAULT_CPU` |
-| `runtime.default_network_mode` | `DEN_RUNTIME__DEFAULT_NETWORK_MODE` |
-| `runtime.reconcile_network` | `DEN_RUNTIME__RECONCILE_NETWORK` |
-| `runtime.allow_unsafe_bridge` | `DEN_RUNTIME__ALLOW_UNSAFE_BRIDGE` |
-| `runtime.allow_unsafe_bind` | `DEN_RUNTIME__ALLOW_UNSAFE_BIND` |
-| `runtime.platform_override` | `DEN_RUNTIME__PLATFORM_OVERRIDE` |
-| `auth.enabled` | `DEN_AUTH__ENABLED` |
-| `log.level` | `DEN_LOG__LEVEL` |
-| `s3.endpoint` | `DEN_S3__ENDPOINT` |
-| `s3.access_key` | `DEN_S3__ACCESS_KEY` |
-| `s3.secret_key` | `DEN_S3__SECRET_KEY` |
-| `s3.allow_internal_endpoint` | `DEN_S3__ALLOW_INTERNAL_ENDPOINT` |
+| `server.port` | `GUINO_SERVER__PORT` |
+| `server.host` | `GUINO_SERVER__HOST` |
+| `sandbox.default_image` | `GUINO_SANDBOX__DEFAULT_IMAGE` |
+| `sandbox.default_timeout` | `GUINO_SANDBOX__DEFAULT_TIMEOUT` |
+| `sandbox.max_sandboxes` | `GUINO_SANDBOX__MAX_SANDBOXES` |
+| `sandbox.default_memory` | `GUINO_SANDBOX__DEFAULT_MEMORY` |
+| `sandbox.default_cpu` | `GUINO_SANDBOX__DEFAULT_CPU` |
+| `runtime.default_network_mode` | `GUINO_RUNTIME__DEFAULT_NETWORK_MODE` |
+| `runtime.reconcile_network` | `GUINO_RUNTIME__RECONCILE_NETWORK` |
+| `runtime.allow_unsafe_bridge` | `GUINO_RUNTIME__ALLOW_UNSAFE_BRIDGE` |
+| `runtime.allow_unsafe_bind` | `GUINO_RUNTIME__ALLOW_UNSAFE_BIND` |
+| `runtime.platform_override` | `GUINO_RUNTIME__PLATFORM_OVERRIDE` |
+| `auth.enabled` | `GUINO_AUTH__ENABLED` |
+| `log.level` | `GUINO_LOG__LEVEL` |
+| `s3.endpoint` | `GUINO_S3__ENDPOINT` |
+| `s3.access_key` | `GUINO_S3__ACCESS_KEY` |
+| `s3.secret_key` | `GUINO_S3__SECRET_KEY` |
+| `s3.allow_internal_endpoint` | `GUINO_S3__ALLOW_INTERNAL_ENDPOINT` |
 
 ## Network Modes & The Bind Guard
 
@@ -114,15 +120,15 @@ may only be `""` (inherit the global default) or `"none"` — a per-sandbox valu
 may only **increase** isolation, never decrease it. Any other per-sandbox value
 (including one equal to the global default) is an **HTTP 400** / MCP tool error.
 
-| Mode | Docker network | Egress | Host port publishing | Tenant boundary? |
+| Mode | Docker network | Egress | Host port publishing | Network isolation? |
 |------|----------------|--------|----------------------|------------------|
 | `internal` *(default)* | `den-net`, `Internal:true` | ✗ | ✗ (port mappings accepted but inert, with a warning) | **No** |
 | `bridge` | `den-net`, `Internal:false` | ✓ unfiltered | ✓ `127.0.0.1` | No |
-| `none` | none | ✗ | ✗ (`ports` ⇒ 400) | **Yes — the only one in v1** |
+| `none` | none | ✗ | ✗ (`ports` ⇒ 400) | **Only loopback remains; shared kernel remains** |
 
 > **`internal` does NOT contain a sandbox.** It still reaches the bridge
 > gateway, the embedded DNS resolver (`127.0.0.11`) and any host service bound
-> to `0.0.0.0`. Only `none` is a tenant/egress boundary in v1. Egress filtering
+> to `0.0.0.0`. `none` disables external networking (container loopback remains) but does not establish a hostile multi-tenant boundary. Egress filtering
 > for `internal` is a tracked follow-up, not in v1.
 
 `bridge` **refuses to start** unless `runtime.allow_unsafe_bridge=true`: there
@@ -133,7 +139,7 @@ to RFC1918, link-local metadata and any host service. This refusal runs in
 ### The bind guard
 
 When the unauthenticated HTTP control plane would be reachable from sandboxes
-on a host that is **not machine-detectably safe**, `den serve` **refuses to
+on a host without an accepted authenticated/network-free configuration or explicit override, `guino serve` **refuses to
 start** (non-zero exit, committed remediation message). It is a no-op in `mcp`
 stdio mode (no HTTP listener), but the bridge refusal above still applies there.
 
@@ -141,22 +147,22 @@ Starting is permitted iff **any** of:
 
 - `auth.enabled=true` with `api_keys` set (the control plane is authenticated), **or**
 - effective network mode is `none` (no path from a sandbox to the control plane), **or**
-- the host is loopback-bound **and** machine-classified `linux-native-docker`
-  **and** `runtime.platform_override="linux-native-docker-co-resident"` is
-  explicitly set (the co-residency attestation), **or**
+- the API is loopback-bound **and**
+  `runtime.platform_override="linux-native-docker-co-resident"` is set. This
+  operator attestation substitutes the native-Linux classification for the
+  bind decision, even if the probe failed or reported another topology, **or**
 - `runtime.allow_unsafe_bind=true` (dangerous last-resort opt-in).
 
 The loopback branch is **refuse-by-default**: a genuinely native-Linux,
 loopback-bound, auth-off host with `platform_override` **unset** still refuses.
 This is deliberate — co-residency of the Docker socket, the bridge gateway and
-the den process is **not machine-verifiable**, so it must be operator-attested.
+the guino process is **not machine-verifiable**, so it must be operator-attested.
 
 `platform_override` accepts **exactly** `""` or the single literal
 `"linux-native-docker-co-resident"` (case-sensitive; any other value is a fatal
-config error). It is **VOID** if the local `unix://` socket is itself proxied to
+config error). It is an **unsupported, false attestation** if the local `unix://` socket is itself proxied to
 a remote/VM daemon (`socat` / `ssh -L` / docker-context / bind-mounted sibling
-socket) — a realistic, not-rare class — in which case the unauthenticated
-control plane is exposed. Both `allow_unsafe_bind=true` and a set
+socket) — a realistic, not-rare class — in which case the override can permit an unsafe auth-off loopback bind. The code trusts the attestation; it does not prove co-residency or reject a false promise. Both `allow_unsafe_bind=true` and a set
 `platform_override` are logged at **ERROR every start**; they are
 risk-equivalent to bypassing the platform classifier.
 
@@ -165,7 +171,7 @@ risk-equivalent to bypassing the platform classifier.
 The host is classified `linux-native-docker` only if **every** clause holds
 (positive allowlist; any failure ⇒ `unknown` ⇒ fail-closed):
 
-- the den process's own `runtime.GOOS == "linux"` (closes the
+- the guino process's own `runtime.GOOS == "linux"` (closes the
   macOS/Windows-host-via-`unix://`-socket-to-Linux-VM hole),
 - `docker info` succeeded and `OSType == "linux"`,
 - `OperatingSystem` does not contain `Docker Desktop`,
@@ -175,7 +181,7 @@ The host is classified `linux-native-docker` only if **every** clause holds
   `ssh://`, `npipe://`).
 
 So loopback alone is **insufficient** on Docker Desktop, rootless, a remote
-daemon, or a non-Linux den host — those refuse unless `auth`/`none`/the
+daemon, or a non-Linux guino host — those refuse unless `auth`/`none`/the
 explicit opt-ins are used.
 
 ## Resource Management
@@ -195,12 +201,12 @@ Controls host memory pressure monitoring and dynamic container throttling.
 
 | Config | Environment Variable |
 |--------|---------------------|
-| `resource.overcommit_ratio` | `DEN_RESOURCE__OVERCOMMIT_RATIO` |
-| `resource.pressure_threshold` | `DEN_RESOURCE__PRESSURE_THRESHOLD` |
-| `resource.critical_threshold` | `DEN_RESOURCE__CRITICAL_THRESHOLD` |
-| `resource.monitor_interval` | `DEN_RESOURCE__MONITOR_INTERVAL` |
-| `resource.enable_auto_throttle` | `DEN_RESOURCE__ENABLE_AUTO_THROTTLE` |
-| `resource.min_memory_floor` | `DEN_RESOURCE__MIN_MEMORY_FLOOR` |
+| `resource.overcommit_ratio` | `GUINO_RESOURCE__OVERCOMMIT_RATIO` |
+| `resource.pressure_threshold` | `GUINO_RESOURCE__PRESSURE_THRESHOLD` |
+| `resource.critical_threshold` | `GUINO_RESOURCE__CRITICAL_THRESHOLD` |
+| `resource.monitor_interval` | `GUINO_RESOURCE__MONITOR_INTERVAL` |
+| `resource.enable_auto_throttle` | `GUINO_RESOURCE__ENABLE_AUTO_THROTTLE` |
+| `resource.min_memory_floor` | `GUINO_RESOURCE__MIN_MEMORY_FLOOR` |
 
 ### Notes
 
@@ -214,17 +220,18 @@ Server startup validates:
 
 - `server.port` must be 1-65535
 - `sandbox.max_sandboxes` must be positive
-- `sandbox.default_memory` must be ≥ 4MB
+- `sandbox.default_memory` may be `0` (unlimited); a positive value must be ≥ 4MB
 - `sandbox.default_timeout` must be valid Go duration
 - `s3.allow_internal_endpoint=true` requires a non-empty, parseable
-  `s3.endpoint`; an endpoint whose construction-time resolved IP set touches a
-  cloud-metadata / link-local / multicast / unspecified address is a **fatal
-  startup error** regardless of the flag
+  `s3.endpoint`. Endpoint DNS resolution and pinned-address validation happen
+  when an S3 client is constructed for an operation or hook, not necessarily at
+  server startup. Resolved cloud-metadata / link-local / multicast / unspecified
+  addresses cause client construction to fail regardless of the flag
 
 ## S3 endpoint SSRF guard
 
-Den's S3 client (import/export and S3 hooks) is protected by an SSRF guard so a
-sandbox — or a sandbox-influenced per-request endpoint — cannot make Den connect
+Guino's S3 client (import/export and S3 hooks) is protected by an SSRF guard so a
+sandbox — or a sandbox-influenced per-request endpoint — cannot make Guino connect
 to internal infrastructure.
 
 - **Default (`s3.allow_internal_endpoint: false`).** Every internal range —
@@ -243,31 +250,30 @@ to internal infrastructure.
   config is dumped with both `access_key` and `secret_key` masked.
 
 To use the trusted server endpoint from a sandbox, **omit `endpoint`** in the
-per-sandbox S3 config — Den falls back to the operator-configured endpoint
+per-sandbox S3 config — Guino falls back to the operator-configured endpoint
 rather than accepting an untrusted one. See `SECURITY.md` §(4) for the full
 threat model and trust boundary.
 
 ## Upgrading
 
-This section is for operators upgrading an existing deployment.
+For the Guino naming changes, see the [migration guide](../migration.md). The notes below describe inherited Den behavior, not new Guino 0.1.0 runtime changes.
 
 - **Bind-guard refusal (already in effect, not new here).** Since the
-  `feat!` network-isolation change (`9ad8988`), `den serve` **refuses to
+  `feat!` network-isolation change (`9ad8988`), `guino serve` **refuses to
   start** when the unauthenticated HTTP control plane would be reachable from
   sandboxes on a host that is not machine-detectably safe. If you upgraded past
   `9ad8988` you have already adopted this. Remediation, in order of preference:
   set `auth.enabled=true` with `api_keys`; or run with effective
   `network_mode=none`; or, **only** on a genuinely native-Linux host where the
-  Docker socket, the bridge gateway and the den process are co-resident, attest
+  Docker socket, the bridge gateway and the guino process are co-resident, attest
   it explicitly with `runtime.platform_override="linux-native-docker-co-resident"`
   (void on proxied/remote/VM Docker — see `SECURITY.md` §10/§11).
-- **S3 internal endpoint now blocked by default (net-new, non-breaking
-  default-deny).** A self-hosted S3/MinIO on `localhost` or the LAN that worked
+- **S3 internal endpoint now blocked by default (inherited default-deny behavior).** A self-hosted S3/MinIO on `localhost` or the LAN that worked
   before is now refused unless you set `s3.allow_internal_endpoint: true` (env
-  `DEN_S3__ALLOW_INTERNAL_ENDPOINT=true`). This is additive and defaults to the
+  `GUINO_S3__ALLOW_INTERNAL_ENDPOINT=true`). This is additive and defaults to the
   secure posture; the only action required is the explicit opt-in for self-host
   topologies.
-- **`Config.String()` diagnostic output (net-new, not an API change).** The
+- **`Config.String()` diagnostic output (inherited behavior).** The
   startup `"s3 config"` log line and any config dump now mask **both**
   `access_key` and `secret_key` (previously only `secret_key`). Log scrapers
   that parsed a cleartext access key from logs must be updated; no on-the-wire

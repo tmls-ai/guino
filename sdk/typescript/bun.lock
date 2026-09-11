@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@agenthouse/sdk",
+      "name": "@tmls-ai/guino",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.4.0",

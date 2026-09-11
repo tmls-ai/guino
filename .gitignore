@@ -1,5 +1,6 @@
 # Binaries
 bin/
+/guino
 /den
 *.exe
 
@@ -7,8 +8,9 @@ bin/
 *.db
 
 # Config
+guino.yaml
 den.yaml
-!den.example.yaml
+!guino.example.yaml
 
 # Go
 vendor/

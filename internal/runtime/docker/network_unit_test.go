@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/us/den/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime"
 )
 
 // --- buildContainerCreateSpec: the v9 none predicate + spoof resistance -----
@@ -66,9 +66,9 @@ func TestBuildContainerCreateSpec_DenLabelsNotCallerSpoofable(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "real-id", cc.Labels[labelID],
-		"Den-set den.id must win over a caller-spoofed value")
+		"Guino-set den.id must win over a caller-spoofed value")
 	assert.NotEqual(t, "1970-01-01T00:00:00Z", cc.Labels[labelCreated],
-		"Den-set den.created must win over a caller-spoofed value")
+		"Guino-set den.created must win over a caller-spoofed value")
 	assert.Equal(t, "keepme", cc.Labels["user.app"], "non-den labels preserved")
 }
 

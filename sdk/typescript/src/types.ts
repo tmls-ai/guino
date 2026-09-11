@@ -189,13 +189,13 @@ export interface PortMapping {
   sandbox_port: number;
   /** Port on the host. */
   host_port: number;
-  /** Protocol — always "tcp". Den does not support udp port publishing. */
+  /** Protocol — always "tcp". Guino does not support udp port publishing. */
   protocol?: string;
 }
 
-/** Configuration for the Den client. */
+/** Configuration for the Guino client. */
 export interface ClientConfig {
-  /** Base URL of the Den server (e.g. "http://localhost:8080"). */
+  /** Base URL of the Guino server (e.g. "http://localhost:8080"). */
   url: string;
   /** API key for authentication. */
   apiKey?: string;

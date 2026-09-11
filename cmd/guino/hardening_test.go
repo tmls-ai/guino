@@ -27,7 +27,7 @@ func scanHardening(name string, f *ast.File) []string {
 
 	for _, imp := range f.Imports {
 		if imp.Path != nil && imp.Path.Value == `"unsafe"` {
-			v = append(v, name+`: forbidden import "unsafe" in the cmd/den control plane`)
+			v = append(v, name+`: forbidden import "unsafe" in the cmd/guino control plane`)
 		}
 	}
 
@@ -64,13 +64,13 @@ func hasBuildConstraint(f *ast.File) bool {
 	return false
 }
 
-// TestCmdDenHardening enforces the invariant over every non-test .go file in
-// the real cmd/den package.
-func TestCmdDenHardening(t *testing.T) {
+// TestCmdGuinoHardening enforces the invariant over every non-test .go file in
+// the real cmd/guino package.
+func TestCmdGuinoHardening(t *testing.T) {
 	fset := token.NewFileSet()
 	entries, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatalf("read cmd/den dir: %v", err)
+		t.Fatalf("read cmd/guino dir: %v", err)
 	}
 
 	checked := 0
@@ -90,15 +90,15 @@ func TestCmdDenHardening(t *testing.T) {
 	}
 
 	if checked == 0 {
-		t.Fatal("no non-test .go files parsed in cmd/den — the scan is vacuous")
+		t.Fatal("no non-test .go files parsed in cmd/guino — the scan is vacuous")
 	}
 }
 
-// TestCmdDenHardening_Predicate is the permanent regression guard for the
+// TestCmdGuinoHardening_Predicate is the permanent regression guard for the
 // precision claim: the scan MUST fire on a real `import "unsafe"` and a real
 // //go:linkname, and MUST NOT fire on the legitimate allow_unsafe_bridge /
 // AllowUnsafeBridge identifiers that a blunt grep would false-match.
-func TestCmdDenHardening_Predicate(t *testing.T) {
+func TestCmdGuinoHardening_Predicate(t *testing.T) {
 	cases := []struct {
 		name     string
 		src      string

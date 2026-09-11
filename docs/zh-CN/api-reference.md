@@ -4,6 +4,8 @@ title: API 参考
 
 # API 参考
 
+S3/MinIO 示例要求运维者在服务端设置 `s3.endpoint` 和 `s3.allow_internal_endpoint: true`（仅在可信的私有端点需要此选项），并提供有效凭据。请求中应省略 `endpoint`，继承服务端端点；启用此例外后不允许逐请求覆盖端点。
+
 [English](../api-reference.md) | **中文**
 
 所有端点位于 `/api/v1/` 路径下。除特别说明外，响应格式均为 JSON。
@@ -74,12 +76,12 @@ Content-Type: application/json
 
 | 字段 | 类型 | 默认值 | 描述 |
 |------|------|--------|------|
-| `image` | string | `ubuntu:22.04` | 使用的 Docker 镜像 |
+| `image` | string | `guino/default:latest` | 使用的 Docker 镜像 |
 | `env` | object | `{}` | 环境变量 |
 | `workdir` | string | `""` | 工作目录 |
 | `timeout` | int | `1800` | 自动过期时间（秒，默认 30 分钟） |
-| `cpu` | int | `1000000000` | CPU 限制，NanoCPU（1核 = 1e9） |
-| `memory` | int | `536870912` | 内存限制，字节（默认 512MB） |
+| `cpu` | int | `0` | CPU 限制，NanoCPU（1核 = 1e9） |
+| `memory` | int | `0` | 内存限制，字节（默认 0，无上限） |
 | `ports` | array | `[]` | 端口映射（`host_port: 0` 自动分配） |
 
 响应 `201 Created`：

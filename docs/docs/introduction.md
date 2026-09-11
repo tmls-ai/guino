@@ -1,127 +1,28 @@
-# Den
+# Guino
 
-Self-hosted, open-source sandbox runtime for AI agents. Run untrusted LLM-generated code in secure, isolated Docker containers with fine-grained resource limits.
+**Local infrastructure for AI agents.**
 
-> **100 sandboxes on E2B = ~$600/hour. 100 sandboxes on Den = one $5/month server.**
+Guino gives agents Docker sandboxes for executing code through a CLI, REST API, WebSocket, SDK or MCP connection. The runtime is self-hosted and remains useful without a commercial service or Guino account.
 
-## Why den?
+This project derives from Den and preserves its Git history, authors and license. The Guino migration adds a new identity and adoption path on top of that work; it does not claim the upstream repository was transferred.
 
-AI agents need to execute code, but running arbitrary LLM output on your machine is dangerous. Cloud sandbox services (E2B etc.) add latency, cost, and vendor lock-in. den gives you the same functionality as a single Go binary you self-host.
+## Start with your workflow
 
-## Shared Resource Model
+- [Quick Start](quick-start.md): build the binary, create a sandbox, execute a command and clean up.
+- [MCP](mcp.md): let Claude Code, Codex, Cursor or another client manage sandboxes directly.
+- [SDKs](sdks.md): integrate local execution into a Go, TypeScript or Python application.
+- [Self-hosting](self-hosting.md): configure authentication, networking, state and resource limits.
 
-Traditional sandbox runtimes allocate fixed resources per container. If each sandbox gets a dedicated 512MB, a server with 8GB RAM can only run ~10 sandboxes before hitting the wall — even when most of them are idle.
+## Included runtime capabilities
 
-Den takes a different approach inspired by Google Borg and AWS Firecracker: **shared memory with pressure-based throttling**.
+Sandbox lifecycle and automatic expiry; synchronous and streaming execution; file operations; Docker image snapshots; persistent/shared volumes and tmpfs; S3 hooks and import/export; optional FUSE; resource pressure monitoring; and an embedded dashboard.
 
-| Approach | Model | 8GB Server Capacity |
-|----------|-------|---------------------|
-| **Traditional** (E2B, etc.) | Fixed 512MB per container | ~10 sandboxes |
-| **Den** (shared resources) | Shared memory + pressure monitoring | **100+ sandboxes** |
+[Core Concepts](concepts.md) explains what persists and how these features work together. [Architecture](architecture.md) retains the detailed technical design.
 
-### How it works
+## Local independence
 
-1. **Overcommit** — Den allows 10x memory overcommit by default. Most sandboxes use a fraction of their allocated memory at any given time.
-2. **Pressure monitoring** — A background goroutine samples host memory every 5 seconds and classifies pressure into 5 levels:
-   - **Normal** (< 80%) — No action
-   - **Warning** (80-85%) — Logged, no action
-   - **High** (85-90%) — Per-container `memory.high` limits applied via cgroup v2
-   - **Critical** (90-95%) — Aggressive throttling, new sandbox creation blocked (HTTP 503)
-   - **Emergency** (> 95%) — Maximum throttling, creation blocked
-3. **Soft limits, not hard kills** — Den uses cgroup v2 `memory.high` (throttle) instead of `memory.max` (OOM kill). Containers slow down under pressure but keep running.
-4. **Auto-recovery** — When pressure drops back to Normal/Warning, memory limits are automatically removed.
+The runtime does not phone a commercial service to execute code. Initial installation still needs downloaded dependencies and images, unless you provide them from an offline cache. S3 and other network services remain optional integrations.
 
-### Cost comparison
+## Security scope
 
-| Setup | Sandboxes | Cost | Per-sandbox cost |
-|-------|-----------|------|------------------|
-| **E2B** | 100 | $0.10/min × 100 = **$600/hr** | $6.00/hr |
-| **Den** (Hetzner CX22) | 100 | **$5/month** | $0.05/month |
-| **Den** (bare metal) | 100 | One-time hardware cost | Effectively free |
-
-That's a **120x cost reduction** for the same workload.
-
-- **Isolated Docker containers** with all capabilities dropped, read-only rootfs, PID limits
-- **REST API + WebSocket** for sandbox lifecycle, command execution, file operations
-- **SDKs** for Go, TypeScript, and Python
-- **MCP server** for Claude Code, Cursor, and other AI tools
-- **Snapshots** — checkpoint and restore sandbox state via `docker commit`
-- **Storage** — persistent volumes, shared volumes, tmpfs, S3 sync (hooks / on-demand / FUSE)
-- **Dashboard UI** for monitoring
-
-## Quick Example
-
-```bash
-# Start the server
-den serve
-
-# Create a sandbox
-den create --image ubuntu:22.04 --timeout 1800 --memory 536870912
-
-# Execute a command
-den exec <sandbox-id> -- python3 -c "print(2 + 2)"
-
-# Destroy the sandbox
-den rm <sandbox-id>
-```
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    client "github.com/us/den/pkg/client"
-)
-
-func main() {
-    c := client.New("http://localhost:8080",
-        client.WithAPIKey("your-api-key"),
-    )
-
-    sb, _ := c.CreateSandbox(context.Background(), client.SandboxConfig{
-        Image:   "ubuntu:22.04",
-        Timeout: "30m",
-    })
-
-    result, _ := c.Exec(context.Background(), sb.ID, client.ExecOpts{
-        Cmd: []string{"python3", "-c", "print('Hello from sandbox!')"},
-    })
-
-    fmt.Println(result.Stdout) // Hello from sandbox!
-    c.DestroySandbox(context.Background(), sb.ID)
-}
-```
-
-## Security Model
-
-Every sandbox container runs with:
-
-| Control | Setting |
-|---------|---------|
-| Capabilities | ALL dropped, only `NET_BIND_SERVICE` added |
-| Rootfs | Read-only |
-| Privileges | `no-new-privileges` |
-| PID limit | 256 (default, configurable) |
-| Memory | 512MB (default, configurable) |
-| CPU | 1 core (default, configurable) |
-| Network | Managed `den-net`: `internal` (default) / `bridge` / `none`. **Only `none` is a tenant boundary** |
-| Port binding | `127.0.0.1` only, fixed at creation, **published only in `bridge`** |
-
-## Performance
-
-Benchmarked on M-series Apple Silicon:
-
-| Operation | Latency |
-|-----------|---------|
-| Create sandbox | ~100-160ms (cold), ~5ms (warm pool) |
-| Execute command | ~20-30ms |
-| Read file | ~28-30ms |
-| Write file | ~56-70ms |
-| Throughput | ~66 req/s |
-
-## Next Steps
-
-- [Installation](#installation) — Install den
-- [Quick Start](#quick-start) — Run your first sandbox
-- [MCP Server](#mcp) — Connect to Claude Code / Cursor
+Docker containers share the host kernel. Guino's controls reduce risk for local and self-hosted agent execution, but do not provide a universal hostile multi-tenant boundary. CPU and memory are unlimited unless configured; `internal` networking is not full isolation. Read [Security](security.md) before selecting a network mode or exposing the API.

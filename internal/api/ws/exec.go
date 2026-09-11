@@ -10,8 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 
-	"github.com/us/den/internal/engine"
-	"github.com/us/den/internal/runtime"
+	"github.com/tmls-ai/guino/internal/engine"
+	"github.com/tmls-ai/guino/internal/runtime"
 )
 
 // ExecHandler handles WebSocket streaming exec.

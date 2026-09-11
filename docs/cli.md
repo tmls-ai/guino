@@ -1,281 +1,109 @@
----
-title: CLI Reference
----
-
 # CLI Reference
 
-Den is a single binary that works as both a server and a CLI client.
+Guino is a single binary with API server, HTTP client and stdio MCP commands. The examples below assume `guino` is on PATH; from a source checkout, use `./bin/guino`.
 
-## Global Flags
+## Global options
 
+```text
+--config string    Runtime configuration file
+--server string    API URL for client commands (default: http://localhost:8080)
 ```
---config string    Config file path (default: den.yaml)
---server string    API server URL for client commands (default: http://localhost:8080)
-```
 
-The server URL can also be set via the `DEN_URL` environment variable.
+`serve` and `mcp` read the selected configuration. Without `--config`, they look for `guino.yaml`, then deprecated `den.yaml`. Client commands use `--server`, then `GUINO_URL`, then the default URL. `GUINO_API_KEY` supplies the client's API key; it does not enable authentication on the server.
 
----
+Legacy `DEN_URL`, `DEN_API_KEY` and nested `DEN_*` configuration names remain deprecated aliases through Guino 0.1.x. `GUINO_*` wins, including when explicitly empty. Legacy use warns on stderr.
 
-## Server
-
-### `den serve`
-
-Start the HTTP API server.
+## guino serve
 
 ```bash
-den serve [flags]
+guino serve --config guino.yaml
 ```
 
-**Flags:**
-```
---config string   Path to config file (default: den.yaml)
-```
+Start the REST/WebSocket API and embedded dashboard. The command validates config, connects to Docker, applies network guards, reconciles persisted resources and starts the engine. The unconfigured `0.0.0.0`/auth-off/`internal` combination is refused; follow the [quickstart](docs/quick-start.md) for a working local configuration.
 
-**Examples:**
-```bash
-# Start with defaults (port 8080, no auth)
-den serve
+Graceful shutdown destroys running sandboxes. Persistent Docker volumes and image snapshots have separate lifecycles. Only one process may manage a database and its Docker resources.
 
-# Start with config file
-den serve --config production.yaml
-```
-
-The server:
-1. Connects to Docker daemon
-2. Creates the `den-net` network (if needed)
-3. Restores any persisted sandboxes from the BoltDB store
-4. Starts the HTTP API and dashboard on the configured port
-
-Press `Ctrl+C` for graceful shutdown (destroys all running sandboxes).
-
----
-
-## Sandbox Management
-
-### `den create`
-
-Create a new sandbox.
+## guino create
 
 ```bash
-den create [flags]
+guino create --image ubuntu:24.04 --timeout 300 --cpu 1000000000 --memory 536870912
 ```
 
-**Flags:**
-```
---image string     Docker image (default: ubuntu:22.04)
---timeout string   Sandbox lifetime (default: 30m)
---cpu int          CPU limit in NanoCPUs
---memory int       Memory limit in bytes
-```
+| Flag | Type | When omitted |
+|------|------|--------------|
+| `--image` | string | Server default; `guino/default:latest` unless configured |
+| `--timeout` | int | Server lifetime default, normally 1800 seconds |
+| `--cpu` | int64 | Server CPU default, normally 0/unlimited; NanoCPUs |
+| `--memory` | int64 | Server memory default, normally 0/unlimited; bytes |
 
-**Examples:**
-```bash
-# Default sandbox
-den create
+Creation prints the sandbox ID. `--timeout` takes seconds: use `3600`, not `1h`. The default image must be built locally, or choose an image already available to Docker.
 
-# Custom image with 1-hour timeout
-den create --image python:3.12 --timeout 1h
-
-# Resource-limited sandbox
-den create --image node:20 --memory 268435456 --cpu 500000000
-```
-
-**Output:**
-```
-d6jcj6a9qf76oti2r2sg
-```
-
-### `den ls`
-
-List all sandboxes.
+## guino ls
 
 ```bash
-den ls
+guino ls
 ```
 
-**Output:**
-```
-ID                     IMAGE           STATUS    CREATED              EXPIRES
-d6jcj6a9qf76oti2r2sg  ubuntu:22.04    running   2026-03-03 11:44:25  2026-03-03 12:14:25
-e7kdk7b0rg87puj3s3th  python:3.12     running   2026-03-03 11:45:00  2026-03-03 12:45:00
-```
+Prints a table with `ID`, `IMAGE`, `STATUS` and `AGE`.
 
-### `den exec`
-
-Execute a command inside a sandbox.
+## guino exec
 
 ```bash
-den exec <sandbox-id> -- <command> [args...]
+guino exec <sandbox-id> -- echo hello
+guino exec <sandbox-id> -- sh -c 'ls -la /tmp'
 ```
 
-**Examples:**
-```bash
-# Simple command
-den exec d6jcj6a9qf76oti2r2sg -- echo "Hello!"
+Commands receive arguments after `--`; use a shell explicitly for shell syntax. Stdout/stderr are forwarded, and a nonzero sandbox command exit status becomes the CLI exit status. Choose an image containing the executable you invoke.
 
-# Run Python
-den exec d6jcj6a9qf76oti2r2sg -- python3 -c "print(2+2)"
-
-# Interactive-style (not truly interactive, but multi-word)
-den exec d6jcj6a9qf76oti2r2sg -- bash -c "ls -la /tmp && echo done"
-```
-
-**Output:**
-```
-Hello!
-```
-
-The command's stdout is printed to your terminal. Non-zero exit codes are reflected in the CLI's exit code.
-
-### `den rm`
-
-Destroy a sandbox (stop and remove).
+## guino rm
 
 ```bash
-den rm <sandbox-id>
+guino rm <sandbox-id>
 ```
 
-**Example:**
-```bash
-den rm d6jcj6a9qf76oti2r2sg
-```
+Stops and removes the sandbox. Export temporary files first.
 
----
-
-## Snapshots
-
-### `den snapshot create`
-
-Create a snapshot of a running sandbox.
+## guino snapshot
 
 ```bash
-den snapshot create <sandbox-id> [flags]
+guino snapshot create <sandbox-id> --name checkpoint
+guino snapshot restore <snapshot-id>
 ```
 
-**Flags:**
-```
---name string   Snapshot name (optional)
-```
+Create prints a snapshot ID; restore prints the new sandbox ID. Snapshots are Docker image snapshots, not process-memory, tmpfs or volume backups. Snapshot listing/deletion is available through the REST API/SDKs; there is no `snapshot ls` CLI subcommand.
 
-**Examples:**
-```bash
-den snapshot create d6jcj6a9qf76oti2r2sg
-den snapshot create d6jcj6a9qf76oti2r2sg --name "after-setup"
-```
-
-### `den snapshot ls`
-
-List snapshots.
+## guino stats
 
 ```bash
-# List all snapshots
-den snapshot ls
-
-# List snapshots for a specific sandbox
-den snapshot ls <sandbox-id>
+guino stats
 ```
 
-### `den snapshot restore`
+Prints total, running and stopped sandbox counts. This command does not implement per-sandbox CPU/memory stats. Use the REST API for detailed resource metrics.
 
-Restore a snapshot to a new sandbox.
+## guino mcp
 
 ```bash
-den snapshot restore <snapshot-id>
+guino mcp --config /absolute/path/guino-mcp.yaml
 ```
 
-Creates a new running sandbox from the snapshot image and prints the new sandbox ID.
+Runs its own engine and Docker runtime over stdin/stdout. Logs go to stderr. It does not connect to `serve`; stop the other runtime before reusing its resources. See [MCP setup](docs/mcp.md). There is no `mcp install` command.
 
----
-
-## Statistics
-
-### `den stats`
-
-Show system or sandbox statistics.
+## guino debug classify-platform
 
 ```bash
-# System-wide stats
-den stats
-
-# Specific sandbox stats
-den stats <sandbox-id>
+guino debug classify-platform
 ```
 
-**System output:**
-```
-Total sandboxes:   5
-Running:           3
-Stopped:           2
-Snapshots:         2
-```
+Prints the Docker topology classifier inputs and verdict for diagnosing network guard refusals.
 
-**Sandbox output:**
-```
-CPU:      2.5%
-Memory:   15 MB / 512 MB
-PIDs:     3
-Net RX:   1.0 KB
-Net TX:   0.5 KB
-```
-
----
-
-## MCP Server
-
-### `den mcp`
-
-Start the MCP (Model Context Protocol) server in stdio mode.
+## guino version
 
 ```bash
-den mcp [flags]
+guino version
 ```
 
-**Flags:**
-```
---config string   Path to config file
-```
+Prints the binary version, commit and build date. Source builds without injected metadata report a development version.
 
-This command starts a JSON-RPC 2.0 server over stdin/stdout, designed to be launched by AI tools like Claude Code or Cursor.
+## Exit status
 
-See [MCP Integration](mcp.md) for setup instructions.
-
----
-
-## Version
-
-### `den version`
-
-Print version information.
-
-```bash
-den version
-```
-
-**Output:**
-```
-den v0.0.2 (abc1234) built 2026-03-03
-```
-
----
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Invalid usage / bad arguments |
-
-For `den exec`, the exit code matches the command's exit code inside the sandbox.
-
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `DEN_URL` | API server URL (default: `http://localhost:8080`) |
-| `DEN_API_KEY` | API key for authentication |
-| `DEN_SERVER__PORT` | Override server port |
-| `DEN_LOG__LEVEL` | Log level (`debug`, `info`, `warn`, `error`) |
-
-See [Configuration](configuration.md) for all environment variable options.
+`0` indicates success; command/setup failures return nonzero. For `exec`, the sandbox command's exit status is propagated.

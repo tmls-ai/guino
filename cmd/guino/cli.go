@@ -9,19 +9,20 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/us/den/pkg/client"
+	"github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/pkg/client"
 )
 
 func getClient(cmd *cobra.Command) *client.Client {
 	serverURL, _ := cmd.Flags().GetString("server")
 	if serverURL == "" {
-		serverURL = os.Getenv("DEN_URL")
+		serverURL = config.Env("URL")
 	}
 	if serverURL == "" {
 		serverURL = "http://localhost:8080"
 	}
 
-	apiKey := os.Getenv("DEN_API_KEY")
+	apiKey := config.Env("API_KEY")
 
 	opts := []client.Option{}
 	if apiKey != "" {
@@ -60,7 +61,7 @@ func createCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().String("image", "", "container image (default: den/default:latest)")
+	cmd.Flags().String("image", "", "container image (default: guino/default:latest)")
 	cmd.Flags().Int("timeout", 0, "timeout in seconds")
 	cmd.Flags().Int64("cpu", 0, "CPU limit in NanoCPUs")
 	cmd.Flags().Int64("memory", 0, "memory limit in bytes")

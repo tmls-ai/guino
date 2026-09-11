@@ -1,3 +1,5 @@
+# Guino configuration. GUINO_ environment variables override these settings.
+# The legacy den.db and den-net defaults intentionally preserve existing state.
 server:
   host: "0.0.0.0"
   port: 8080
@@ -10,7 +12,7 @@ runtime:
   backend: "docker"
   # docker_host is INERT: it has NO effect. The Docker endpoint is controlled
   # solely by the DOCKER_HOST environment variable. Kept only for config
-  # backward-compatibility; den logs a WARN if it is set.
+  # backward-compatibility; Guino logs a WARN if it is set.
   docker_host: ""
   network_id: "den-net"
 
@@ -41,8 +43,8 @@ runtime:
   # allow_unsafe_bind is the dangerous last-resort opt-in that DISABLES the
   # startup bind guard entirely. The bind guard refuses to start when the
   # unauthenticated HTTP control plane would be reachable from sandboxes on a
-  # host that is not machine-detectably safe. Setting this true exposes the den
-  # API to sandboxes (host escalation path). den logs an ERROR every start.
+  # host that is not machine-detectably safe. Setting this true exposes the Guino
+  # API to sandboxes (host escalation path). Guino logs an ERROR every start.
   # Prefer auth.enabled=true, or default_network_mode=none, or platform_override.
   allow_unsafe_bind: false
 
@@ -50,7 +52,7 @@ runtime:
   # EXACTLY "" (default) or the single literal "linux-native-docker-co-resident"
   # (any other value is a fatal config error). When set to the literal the
   # operator attests the Docker socket is local AND co-resident with the bridge
-  # gateway and this den process. It (a) unlocks the bind guard's loopback
+  # gateway and this Guino process. It (a) unlocks the bind guard's loopback
   # branch and (b) is logged at ERROR every start. It is VOID if the local
   # unix:// socket is itself proxied to a remote/VM daemon (socat / ssh -L /
   # docker-context / bind-mounted sibling socket) — in that case the
@@ -59,7 +61,7 @@ runtime:
   platform_override: ""
 
 sandbox:
-  default_image: "den/default:latest"
+  default_image: "guino/default:latest"
   default_timeout: "30m"
   max_sandboxes: 50
   default_cpu: 1000000000 # 1 core (in NanoCPUs)
@@ -106,5 +108,5 @@ s3:
   # construction-time resolved IP set (no DNS rebinding) and per-sandbox
   # endpoint overrides are refused. Cloud-metadata, link-local, multicast
   # and unspecified addresses are NEVER reachable regardless of this flag.
-  # Env: DEN_S3__ALLOW_INTERNAL_ENDPOINT=true
+  # Env: GUINO_S3__ALLOW_INTERNAL_ENDPOINT=true
   allow_internal_endpoint: false

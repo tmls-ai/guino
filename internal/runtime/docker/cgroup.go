@@ -13,7 +13,7 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// validContainerID matches Docker container IDs (hex) and den sandbox IDs (alphanumeric).
+// validContainerID matches Docker container IDs (hex) and Guino sandbox IDs (alphanumeric).
 var validContainerID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
 func validateContainerID(id string) error {

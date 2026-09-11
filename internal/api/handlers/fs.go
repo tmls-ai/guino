@@ -10,8 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/us/den/internal/engine"
-	"github.com/us/den/internal/pathutil"
+	"github.com/tmls-ai/guino/internal/engine"
+	"github.com/tmls-ai/guino/internal/pathutil"
 )
 
 // FileHandler handles file operations.

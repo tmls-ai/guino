@@ -11,13 +11,13 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	"github.com/us/den/internal/api/handlers"
-	"github.com/us/den/internal/api/middleware"
-	"github.com/us/den/internal/api/ws"
-	"github.com/us/den/internal/config"
-	"github.com/us/den/internal/dashboard"
-	"github.com/us/den/internal/engine"
-	"github.com/us/den/internal/runtime"
+	"github.com/tmls-ai/guino/internal/api/handlers"
+	"github.com/tmls-ai/guino/internal/api/middleware"
+	"github.com/tmls-ai/guino/internal/api/ws"
+	"github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/internal/dashboard"
+	"github.com/tmls-ai/guino/internal/engine"
+	"github.com/tmls-ai/guino/internal/runtime"
 )
 
 // Server is the HTTP API server.

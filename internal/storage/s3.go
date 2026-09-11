@@ -12,12 +12,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	serverconfig "github.com/us/den/internal/config"
-	"github.com/us/den/internal/runtime"
-	"github.com/us/den/internal/security/ssrf"
+	serverconfig "github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/internal/runtime"
+	"github.com/tmls-ai/guino/internal/security/ssrf"
 )
 
-// S3Client wraps the AWS S3 client with den-specific operations.
+// S3Client wraps the AWS S3 client with Guino-specific operations.
 type S3Client struct {
 	client *s3.Client
 	logger *slog.Logger
@@ -46,7 +46,7 @@ func ResolveS3Credentials(sandbox *runtime.S3SyncConfig, server serverconfig.S3C
 	// Gate B — endpoint-override refusal (defense-in-depth, not the sole
 	// gate). When the internal-endpoint exemption is active, the exemption is
 	// pinned to the SINGLE server-configured endpoint; a per-sandbox endpoint
-	// override would let a sandbox redirect den at an arbitrary internal host,
+	// override would let a sandbox redirect Guino at an arbitrary internal host,
 	// so it is refused here — before the flatten below — which transitively
 	// covers all three client-construction paths (engine s3 hooks and the
 	// post-validate API handlers) with no per-site refusal code.
@@ -124,7 +124,7 @@ func ResolveS3Credentials(sandbox *runtime.S3SyncConfig, server serverconfig.S3C
 // untouched on the request, so the SDK's TLS SNI and certificate verification
 // still run against the configured host even though the socket connects to a
 // pinned IP. CheckRedirect re-validates every 3xx hop through the same
-// predicate so a region/host redirect cannot smuggle den onto an internal box.
+// predicate so a region/host redirect cannot smuggle Guino onto an internal box.
 func ssrfPinnedHTTPClient(ctx context.Context, endpoint string, allowInternal bool) (*http.Client, error) {
 	resolve := func(host string) ([]net.IP, error) {
 		return net.DefaultResolver.LookupIP(ctx, "ip", host)
@@ -141,7 +141,7 @@ func ssrfPinnedHTTPClient(ctx context.Context, endpoint string, allowInternal bo
 		return nil, fmt.Errorf(
 			"S3 endpoint %q resolves to %s, which is in a never-exempt "+
 				"range (cloud-metadata/link-local/multicast/unspecified) and can "+
-				"never be used as a den storage endpoint", endpoint, bad)
+				"never be used as a Guino storage endpoint", endpoint, bad)
 	}
 
 	dialer := &net.Dialer{}

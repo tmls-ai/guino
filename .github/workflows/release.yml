@@ -1,85 +1,127 @@
 name: Release
-
 on:
-  push:
-    tags:
-      - "v*"
-
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing Guino tag to publish (for example v0.1.0)
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+concurrency:
+  group: guino-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 permissions:
-  contents: write
-  packages: write
-
+  contents: read
 jobs:
-  release:
+  validate:
+    # Keep disabled during history import. Old Den tags must never publish Guino.
+    if: vars.GUINO_RELEASES_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+      - name: Verify tag and package identities
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/check-release.py --tag "$RELEASE_TAG"
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+          test -n "$NPM_TOKEN" || { echo 'Configure NPM_TOKEN before release'; exit 1; }
+          test -n "$PYPI_TOKEN" || { echo 'Configure PYPI_TOKEN before release'; exit 1; }
+  checks:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+  release:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Run GoReleaser
+      - name: Publish Guino archives and checksums
         uses: goreleaser/goreleaser-action@v6
         with:
-          version: latest
+          version: '~> v2'
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Index on Go proxy
-        run: GOPROXY=proxy.golang.org go list -m github.com/us/den@${{ github.ref_name }}
-
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: GOPROXY=proxy.golang.org go list -m "github.com/tmls-ai/guino@$RELEASE_TAG"
   publish-sdk-ts:
     runs-on: ubuntu-latest
-    needs: [release]
+    needs: release
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
       - working-directory: sdk/typescript
         run: |
-          bun install
+          bun install --frozen-lockfile
           bun run build
-      - uses: JS-DevTools/npm-publish@v3
-        if: env.NPM_TOKEN != ''
-        with:
-          token: ${{ secrets.NPM_TOKEN }}
-          package: sdk/typescript
-          access: public
+          npm publish --access public
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
   publish-sdk-py:
     runs-on: ubuntu-latest
-    needs: [release]
+    needs: release
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: astral-sh/setup-uv@v5
       - working-directory: sdk/python
-        run: uv build
-      - name: Publish to PyPI
-        if: env.PYPI_TOKEN != ''
-        working-directory: sdk/python
-        run: uv publish --token "$PYPI_TOKEN"
+        run: |
+          uv build
+          uv publish --token "$PYPI_TOKEN"
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-
   docker:
     runs-on: ubuntu-latest
-    needs: [release]
+    needs: release
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push default image
+      - name: Publish default image
         uses: docker/build-push-action@v6
         with:
           context: images/default
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}/default:latest
-            ghcr.io/${{ github.repository }}/default:${{ github.ref_name }}
+            ghcr.io/tmls-ai/guino/default:latest
+            ghcr.io/tmls-ai/guino/default:${{ inputs.tag || github.ref_name }}
           platforms: linux/amd64,linux/arm64

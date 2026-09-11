@@ -8,13 +8,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/us/den/internal/config"
-	"github.com/us/den/internal/engine"
-	"github.com/us/den/internal/mcp"
-	"github.com/us/den/internal/runtime"
-	"github.com/us/den/internal/runtime/docker"
-	"github.com/us/den/internal/runtime/netpolicy"
-	"github.com/us/den/internal/store"
+	"github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/internal/engine"
+	"github.com/tmls-ai/guino/internal/mcp"
+	"github.com/tmls-ai/guino/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime/docker"
+	"github.com/tmls-ai/guino/internal/runtime/netpolicy"
+	"github.com/tmls-ai/guino/internal/store"
 )
 
 func mcpCmd() *cobra.Command {
@@ -64,7 +64,7 @@ func mcpCmd() *cobra.Command {
 			// Same ordered, fail-fast startup as `serve`. MCP is stdio-only:
 			// the bind guard is a no-op (httpListener=false), but the
 			// bridge-refusal guard still runs — a bridge sandbox has
-			// unfiltered egress regardless of whether den exposes an HTTP API.
+			// unfiltered egress regardless of whether Guino exposes an HTTP API.
 			if err := runStartup(ctx, startupSteps{
 				ping:      rt.Ping,
 				guard:     func(c context.Context) error { return applyNetworkGuards(c, rt, cfg, logger, false) },

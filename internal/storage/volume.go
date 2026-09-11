@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/us/den/internal/pathutil"
+	"github.com/tmls-ai/guino/internal/pathutil"
 )
 
 const (

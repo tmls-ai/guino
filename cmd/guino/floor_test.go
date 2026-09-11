@@ -8,32 +8,32 @@ import (
 	"testing"
 )
 
-// This file is the cmd/den package-local named-proof FLOOR. testing.M.Run()
+// This file is the cmd/guino package-local named-proof FLOOR. testing.M.Run()
 // returns only an exit code, never which tests ran, so a build that silently
 // skips/excludes the four hermetic platform_override proofs (build-tag drift,
-// a stray `t.Skip`, a deleted test that still leaves the rest of cmd/den
+// a stray `t.Skip`, a deleted test that still leaves the rest of cmd/guino
 // green) would exit 0. TestMain asserts, by NAME, that each required proof
 // executed.
 //
 // This is a TRUE NAMED-SET floor, NOT the netpolicytest count model. A
 // reviewer correctly flagged that netpolicytest.Mark only increments an
 // int64 and never records t.Name(): a bare counter would still pass if any
-// OTHER cmd/den test ran after a proof was deleted — that is a count floor
+// OTHER cmd/guino test ran after a proof was deleted — that is a count floor
 // mislabeled "named". Here mark(t) records t.Name() into `seen` and TestMain
 // asserts the SPECIFIC required names are present, so deleting any one fails
-// loudly even with the rest of cmd/den green.
+// loudly even with the rest of cmd/guino green.
 //
 // runFilterActive() is intentionally a ~6-line copy of
 // netpolicytest/mark.go's unexported helper (cross-referenced here). The
 // floor is inert under an explicit -run/-skip because the operator then
 // deliberately selected a subset (e.g. `make test-integration` runs
-// `-run TestIntegration`, matching zero cmd/den proofs) — enforcing it there
+// `-run TestIntegration`, matching zero cmd/guino proofs) — enforcing it there
 // would be a false failure. A tiny independent name-set is lower-risk than
 // widening netpolicytest's API or coupling two unrelated package floors by
 // reading its shared counter (different package, different suite).
 
 // requiredProofs are the four hermetic platform_override proofs that MUST
-// have executed on an unfiltered `go test ./cmd/den/...`.
+// have executed on an unfiltered `go test ./cmd/guino/...`.
 var requiredProofs = []string{
 	"TestApplyNetworkGuards_PositiveOverrideAttested",
 	"TestApplyNetworkGuards_RefusalWithoutOverride",
@@ -74,7 +74,7 @@ func TestMain(m *testing.M) {
 		}
 		if len(missing) > 0 {
 			fmt.Fprintf(os.Stderr,
-				"cmd/den named-proof floor NOT met: these required platform_override "+
+				"cmd/guino named-proof floor NOT met: these required platform_override "+
 					"proofs did not execute: %v (build-tag drift, a stray t.Skip, or a "+
 					"deleted proof — failing loudly)\n", missing)
 			if code == 0 {

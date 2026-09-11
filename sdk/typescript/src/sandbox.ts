@@ -10,13 +10,13 @@ import type {
 } from "./types.js";
 
 /** Error thrown when an API request fails. */
-export class DenError extends Error {
+export class GuinoError extends Error {
   constructor(
     public readonly statusCode: number,
     message: string,
   ) {
     super(message);
-    this.name = "DenError";
+    this.name = "GuinoError";
   }
 }
 
@@ -57,7 +57,7 @@ class HttpClient {
         // If we cannot parse JSON, use the status text
         message = `API error (${response.status}): ${response.statusText}`;
       }
-      throw new DenError(response.status, message);
+      throw new GuinoError(response.status, message);
     }
 
     return response.json() as Promise<T>;
@@ -80,7 +80,7 @@ class HttpClient {
       } catch {
         message = `API error (${response.status}): ${response.statusText}`;
       }
-      throw new DenError(response.status, message);
+      throw new GuinoError(response.status, message);
     }
 
     return response.arrayBuffer();
@@ -115,7 +115,7 @@ class HttpClient {
       } catch {
         message = `API error (${response.status}): ${response.statusText}`;
       }
-      throw new DenError(response.status, message);
+      throw new GuinoError(response.status, message);
     }
   }
 
@@ -136,7 +136,7 @@ class HttpClient {
       } catch {
         message = `API error (${response.status}): ${response.statusText}`;
       }
-      throw new DenError(response.status, message);
+      throw new GuinoError(response.status, message);
     }
   }
 }
@@ -310,7 +310,7 @@ export class Sandbox {
 
 /**
  * Manages sandbox lifecycle operations.
- * Access via `Den.sandbox`.
+ * Access via `Guino.sandbox`.
  */
 export class SandboxManager {
   /** @internal */
@@ -342,9 +342,9 @@ export class SandboxManager {
       this.features = new Set(v.features ?? []);
     }
     if (!this.features.has(feature)) {
-      throw new DenError(
+      throw new GuinoError(
         0,
-        `server does not advertise the "${feature}" feature; upgrade Den or omit network_mode`,
+        `server does not advertise the "${feature}" feature; upgrade Guino or omit network_mode`,
       );
     }
   }
@@ -426,3 +426,6 @@ export class SandboxManager {
     );
   }
 }
+
+/** @deprecated Use GuinoError. This alias is retained for the 0.1.x transition. */
+export { GuinoError as DenError };

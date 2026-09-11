@@ -1,5 +1,5 @@
-export { Den } from "./client.js";
-export { Sandbox, SandboxManager, DenError } from "./sandbox.js";
+export { Guino, Den } from "./client.js";
+export { Sandbox, SandboxManager, GuinoError, DenError } from "./sandbox.js";
 export type {
   SandboxConfig,
   SandboxInfo,

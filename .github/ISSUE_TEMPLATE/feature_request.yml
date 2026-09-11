@@ -1,0 +1,23 @@
+name: Feature request
+description: Propose a concrete improvement to Guino.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or workflow
+      description: What local or self-hosted workflow is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed behavior
+      description: Include a concrete example and alternatives you considered.
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and scope
+      description: Describe effects on existing users, local independence or security boundaries.

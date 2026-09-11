@@ -1,4 +1,4 @@
-module github.com/us/den
+module github.com/tmls-ai/guino
 
 go 1.25.7
 

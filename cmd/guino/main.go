@@ -12,14 +12,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/us/den/internal/api"
-	"github.com/us/den/internal/api/handlers"
-	"github.com/us/den/internal/config"
-	"github.com/us/den/internal/engine"
-	"github.com/us/den/internal/runtime"
-	"github.com/us/den/internal/runtime/docker"
-	"github.com/us/den/internal/runtime/netpolicy"
-	"github.com/us/den/internal/store"
+	"github.com/tmls-ai/guino/internal/api"
+	"github.com/tmls-ai/guino/internal/api/handlers"
+	"github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/internal/engine"
+	"github.com/tmls-ai/guino/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime/docker"
+	"github.com/tmls-ai/guino/internal/runtime/netpolicy"
+	"github.com/tmls-ai/guino/internal/store"
 )
 
 var (
@@ -34,16 +34,16 @@ func main() {
 	handlers.SetVersion(version, commit, buildDate)
 
 	rootCmd := &cobra.Command{
-		Use:   "den",
+		Use:   "guino",
 		Short: "Self-hosted sandbox runtime for AI agents",
-		Long:  "Den provides secure, isolated sandbox environments for AI agents to execute code.",
+		Long:  "Guino provides secure, isolated sandbox environments for AI agents to execute code.",
 		// A guard refusal is an operator config error, not a usage error:
 		// don't bury the committed remediation message under a usage dump.
 		SilenceUsage: true,
 	}
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: den.yaml)")
-	rootCmd.PersistentFlags().String("server", "", "den server URL (default: http://localhost:8080)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: guino.yaml; den.yaml supported through 0.1.x)")
+	rootCmd.PersistentFlags().String("server", "", "Guino server URL (default: http://localhost:8080)")
 
 	rootCmd.AddCommand(serveCmd())
 	rootCmd.AddCommand(versionCmd())
@@ -64,7 +64,7 @@ func main() {
 func serveCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "serve",
-		Short: "Start the den API server",
+		Short: "Start the Guino API server",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			// Setup logger
 			logLevel := slog.LevelInfo
@@ -156,7 +156,7 @@ func serveCmd() *cobra.Command {
 				logger.Warn("authentication is DISABLED — API is publicly accessible, set auth.enabled=true in production")
 			}
 
-			// Protect Den process from OOM killer (Linux only)
+			// Protect Guino process from OOM killer (Linux only)
 			protectProcess(logger)
 
 			// Setup engine
@@ -176,7 +176,7 @@ func serveCmd() *cobra.Command {
 				errCh <- srv.Start()
 			}()
 
-			logger.Info("den server started",
+			logger.Info("Guino server started",
 				"version", version,
 				"addr", fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
 			)
@@ -195,7 +195,7 @@ func serveCmd() *cobra.Command {
 	}
 }
 
-// protectProcess sets a low OOM score for the Den process on Linux.
+// protectProcess sets a low OOM score for the Guino process on Linux.
 // This makes it less likely to be killed when the host is under memory pressure.
 func protectProcess(logger *slog.Logger) {
 	if goruntime.GOOS != "linux" {
@@ -214,7 +214,7 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(_ *cobra.Command, _ []string) {
-			fmt.Printf("den %s (commit: %s, built: %s)\n", version, commit, buildDate)
+			fmt.Printf("guino %s (commit: %s, built: %s)\n", version, commit, buildDate)
 		},
 	}
 }

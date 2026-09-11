@@ -78,8 +78,8 @@ Port mappings are applied **at container-create time** via Docker-native
 `network_mode=bridge`** — they are inert in `internal` and rejected in `none`.
 There is no userspace port-forwarder and no runtime add/remove: `POST`/`DELETE
 /api/v1/sandboxes/{id}/ports` permanently return `501`. **Docker-out-of-Docker
-(DooD): when den's Docker client points at a remote or socket-proxied daemon,
-`127.0.0.1` host bindings land on the *daemon* host, not the den host — DooD
+(DooD): when guino's Docker client points at a remote or socket-proxied daemon,
+`127.0.0.1` host bindings land on the *daemon* host, not the guino host — DooD
 port access is unsupported.** The legacy in-process `PortForwarder`
 (`network.go`) was removed in v9.
 
@@ -148,13 +148,13 @@ JSON-RPC 2.0 over stdio. Creates its own Engine + Docker Runtime instance (does 
 
 | Control | Setting |
 |---------|---------|
-| Capabilities | `ALL` dropped, `NET_BIND_SERVICE` added |
-| Root filesystem | Read-only (`ReadonlyRootfs: true`) |
+| Capabilities | `ALL` dropped; `NET_BIND_SERVICE`, `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE`, `FOWNER` added |
+| Root filesystem | Read-only by default; explicit writable-root option supported |
 | Privileges | `no-new-privileges` security option |
 | PID limit | Default 256 (prevents fork bombs) |
-| Memory limit | Default 512MB (soft throttle via `memory.high`; OOM kill only at `memory.max`) |
-| CPU limit | Default 1 core |
-| Network | Managed `den-net`: `internal` (default, no egress) / `bridge` (egress + published ports) / `none` (no interface). **Only `none` is a tenant boundary** |
+| Memory limit | Default 0 (unlimited); configure explicit limits; pressure throttling is additional |
+| CPU limit | Default 0 (unlimited); nonzero quota uses NanoCPUs |
+| Network | Managed `den-net`: `internal` (default, no egress) / `bridge` (egress + published ports) / `none` (loopback only). **`none` disables external networking (container loopback remains); all modes share the kernel** |
 | Port binding | Docker-native, `127.0.0.1` only, fixed at creation, **published only in `bridge`** (`POST`/`DELETE /ports` → `501`) |
 | Path validation | Null byte rejection, traversal protection |
 

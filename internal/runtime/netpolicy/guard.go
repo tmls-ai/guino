@@ -6,7 +6,7 @@ import (
 
 	"github.com/docker/docker/api/types/system"
 
-	"github.com/us/den/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime"
 )
 
 // ClassifyHost maps the configured server.host to a HostClass.
@@ -31,7 +31,7 @@ func ClassifyHost(host string) HostClass {
 //	    SystemInfo(ctx) MUST be mapped to PlatformUnknown WITHOUT calling this
 //	    function (clause kept off the pure signature so it stays total over
 //	    an injected system.Info in unit tests).
-//	(b) clientGOOS == "linux"  — the den process's own runtime.GOOS; closes
+//	(b) clientGOOS == "linux"  — the Guino process's own runtime.GOOS; closes
 //	    the macOS/Windows-host-via-unix://-socket-to-Linux-VM hole
 //	(c) info.OSType == "linux"
 //	(d) info.OperatingSystem does NOT contain "Docker Desktop"
@@ -91,7 +91,7 @@ func isLocalDockerHost(daemonHost string) bool {
 }
 
 // BindGuardDecision is the pure safety decision for the HTTP control plane.
-// It returns whether starting is SAFE. The caller (cmd/den) is responsible for
+// It returns whether starting is SAFE. The caller (cmd/guino) is responsible for
 // making it a no-op when there is no HTTP listener (MCP-only mode).
 //
 // Safe iff ANY of:
@@ -129,10 +129,10 @@ func BindGuardDecision(
 	return false
 }
 
-// BridgeRefusalDecision reports whether den must refuse to start because the
+// BridgeRefusalDecision reports whether Guino must refuse to start because the
 // effective global default mode is bridge without an explicit unsafe opt-in.
 // This runs in BOTH HTTP and MCP mode (a bridge sandbox has unfiltered egress
-// regardless of whether den exposes an HTTP listener).
+// regardless of whether Guino exposes an HTTP listener).
 func BridgeRefusalDecision(globalDefaultMode runtime.NetworkMode, allowUnsafeBridge bool) (refuse bool) {
 	return globalDefaultMode == runtime.NetworkModeBridge && !allowUnsafeBridge
 }

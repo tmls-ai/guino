@@ -8,9 +8,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/us/den/internal/engine"
-	"github.com/us/den/internal/runtime"
-	"github.com/us/den/internal/runtime/netpolicy"
+	"github.com/tmls-ai/guino/internal/engine"
+	"github.com/tmls-ai/guino/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime/netpolicy"
 )
 
 // SandboxHandler handles sandbox CRUD operations.

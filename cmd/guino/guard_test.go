@@ -18,9 +18,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/us/den/internal/config"
-	"github.com/us/den/internal/runtime/docker"
-	"github.com/us/den/internal/runtime/netpolicy"
+	"github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/internal/runtime/docker"
+	"github.com/tmls-ai/guino/internal/runtime/netpolicy"
 )
 
 func quietLogger() *slog.Logger {
@@ -86,7 +86,7 @@ func TestRunStartup_PingFailureAbortsBeforeGuard(t *testing.T) {
 // --- bridge-refusal runs in MCP mode (httpListener=false) --------------------
 //
 // MCP is stdio-only so the bind guard is a no-op, but a bridge sandbox has
-// unfiltered egress regardless of whether den exposes an HTTP API. The
+// unfiltered egress regardless of whether Guino exposes an HTTP API. The
 // bridge-refusal guard MUST still fire. docker.New() is lazy (no daemon
 // contacted) and the bridge check returns before rt is ever touched.
 
@@ -256,7 +256,7 @@ func captureStderr(t *testing.T) (read func() string) {
 
 // guardBindActiveConfig returns a config whose bind guard WOULD refuse under
 // an HTTP listener (auth off + loopback bind + non-`none` default mode) so the
-// only thing that can let den start is an attested platform_override.
+// only thing that can let Guino start is an attested platform_override.
 func guardBindActiveConfig(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := config.DefaultConfig()
@@ -276,7 +276,7 @@ func fakeProbe(p netpolicy.RuntimePlatform, err error) platformProbe {
 }
 
 // TestApplyNetworkGuards_PositiveOverrideAttested: a healthy probe +
-// attested override + loopback bind + auth off + httpListener=true ⇒ den
+// attested override + loopback bind + auth off + httpListener=true ⇒ Guino
 // STARTS and logs MsgPlatformOverrideAttested at ERROR. This is the positive
 // branch that was previously only provable in a real native-Linux topology.
 func TestApplyNetworkGuards_PositiveOverrideAttested(t *testing.T) {
@@ -296,7 +296,7 @@ func TestApplyNetworkGuards_PositiveOverrideAttested(t *testing.T) {
 }
 
 // TestApplyNetworkGuards_RefusalWithoutOverride: same posture MINUS the
-// override ⇒ den REFUSES. Asserts the returned-error literal AND that the
+// override ⇒ Guino REFUSES. Asserts the returned-error literal AND that the
 // committed MsgBindRefusal reached stderr (not slog).
 func TestApplyNetworkGuards_RefusalWithoutOverride(t *testing.T) {
 	mark(t)
@@ -319,7 +319,7 @@ func TestApplyNetworkGuards_RefusalWithoutOverride(t *testing.T) {
 
 // TestApplyNetworkGuards_ProbeErrorAttestedStarts: an INDETERMINATE probe
 // (daemon unreachable) is exactly the case platform_override exists for.
-// probe error + attested ⇒ den STARTS + ERROR attestation. The indeterminate
+// probe error + attested ⇒ Guino STARTS + ERROR attestation. The indeterminate
 // probe must NOT silently downgrade/override the operator's override.
 func TestApplyNetworkGuards_ProbeErrorAttestedStarts(t *testing.T) {
 	mark(t)

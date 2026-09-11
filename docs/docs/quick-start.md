@@ -1,99 +1,58 @@
 # Quick Start
 
-## 1. Start the Server
+This walkthrough uses a trusted local machine, a Docker image with `/bin/sh`, and explicit CPU/memory limits. Complete [Installation](installation.md) first and run commands from the repository root.
+
+## 1. Start the API server
 
 ```bash
-den serve
-# Or with a config file
-den serve --config den.yaml
+GUINO_SERVER__HOST=127.0.0.1 \
+GUINO_RUNTIME__DEFAULT_NETWORK_MODE=none \
+GUINO_SANDBOX__DEFAULT_CPU=1000000000 \
+GUINO_SANDBOX__DEFAULT_MEMORY=536870912 \
+./bin/guino serve
 ```
 
-The API server starts on `http://localhost:8080` with an embedded dashboard.
+The API and dashboard run at `http://127.0.0.1:8080`. The sandbox has only its own loopback network interface. Authentication is disabled by default, so use this example only on a trusted local machine. Existing `guino.yaml`/legacy `den.yaml` settings and environment overrides still apply.
 
-## 2. Create a Sandbox
+The unconfigured server uses `0.0.0.0`, authentication off and `internal` networking; the bind guard intentionally refuses that combination. The explicit loopback/`none` settings above avoid bypassing that guard.
+
+## 2. Create and use a sandbox
+
+In another terminal, from the repository root:
 
 ```bash
-den create --image ubuntu:22.04 --timeout 1800 --memory 536870912
-# → cq4hsj3k...
+sandbox_id=$(./bin/guino create --image ubuntu:24.04 --timeout 300)
+./bin/guino exec "$sandbox_id" -- sh -c 'echo Hello from Guino'
+./bin/guino ls
+./bin/guino stats
 ```
 
-Or via the API:
+The create command prints the sandbox ID. `--timeout` is its lifetime in **seconds**. The CLI `stats` command reports counts; detailed per-sandbox resource stats are available through the REST API.
+
+## 3. Read and write files
+
+Use the same second terminal so `sandbox_id` remains set:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/sandboxes \
-  -H 'Content-Type: application/json' \
-  -d '{"image": "ubuntu:22.04"}'
-# → {"id":"cq4hsj3k","status":"running",...}
+curl -fsS -X PUT "http://127.0.0.1:8080/api/v1/sandboxes/$sandbox_id/files?path=/tmp/hello.txt" \
+  --data-binary 'Hello from a file'
+curl -fsS "http://127.0.0.1:8080/api/v1/sandboxes/$sandbox_id/files?path=/tmp/hello.txt"
 ```
 
-## 3. Execute Commands
+`/tmp` is a writable tmpfs. Its contents are temporary and are not captured in image snapshots. Use persistent volumes or export data when it must survive sandbox destruction.
+
+## 4. Clean up
 
 ```bash
-den exec cq4hsj3k -- python3 -c "print(2+2)"
-# 4
+./bin/guino rm "$sandbox_id"
 ```
 
-```bash
-curl -X POST http://localhost:8080/api/v1/sandboxes/cq4hsj3k/exec \
-  -H 'Content-Type: application/json' \
-  -d '{"cmd": ["python3", "-c", "print(2+2)"]}'
-# → {"exit_code":0,"stdout":"4\n","stderr":""}
-```
+The running engine also expires sandboxes after their configured lifetime. Graceful API server shutdown destroys its running sandboxes. See [Core Concepts](concepts.md) for snapshot and volume lifecycle details.
 
-## 4. File Operations
+## 5. Connect an agent
 
-```bash
-# Write a file
-curl -X PUT 'http://localhost:8080/api/v1/sandboxes/cq4hsj3k/files?path=/tmp/hello.py' \
-  -d 'print("Hello from sandbox!")'
+Stop the API server before reusing its database/resources with `guino mcp`. MCP runs its own engine over stdio; it is not an HTTP client of `serve`. Follow [MCP setup](mcp.md), then ask your agent:
 
-# Read a file
-curl 'http://localhost:8080/api/v1/sandboxes/cq4hsj3k/files?path=/tmp/hello.py'
-```
+> Create an Ubuntu 24.04 sandbox with no network, execute `echo Hello from Guino`, show the output, then destroy the sandbox.
 
-## 5. Snapshots
-
-```bash
-# Create a snapshot
-den snapshot create cq4hsj3k --name "after-setup"
-
-# List snapshots
-den snapshot ls cq4hsj3k
-
-# Restore from snapshot (creates new sandbox)
-den snapshot restore <snapshot-id>
-```
-
-## 6. List & Destroy
-
-```bash
-# List all sandboxes
-den ls
-# ID        IMAGE           STATUS    AGE
-# cq4hsj3k  ubuntu:22.04    running   5m
-
-# Resource stats
-den stats cq4hsj3k
-# CPU: 2.5%  Memory: 15 MB / 512 MB  PIDs: 3
-
-# Destroy
-den rm cq4hsj3k
-```
-
-## Environment Variables
-
-Instead of `--config`:
-
-```bash
-DEN_SERVER__PORT=9090 \
-DEN_SANDBOX__MAX_SANDBOXES=100 \
-DEN_AUTH__ENABLED=true \
-den serve
-```
-
-## Next Steps
-
-- [Architecture](#architecture) — How isolation works
-- [Configuration](#configuration) — Full `den.yaml` reference
-- [REST API](#rest-api) — All API endpoints
-- [MCP Server](#mcp) — Connect to Claude Code
+For programmatic clients, see [SDKs](sdks.md), [REST API](rest-api.md) and [Custom Agents](custom-agents.md).

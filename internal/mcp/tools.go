@@ -9,9 +9,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/us/den/internal/pathutil"
-	"github.com/us/den/internal/runtime"
-	"github.com/us/den/internal/runtime/netpolicy"
+	"github.com/tmls-ai/guino/internal/pathutil"
+	"github.com/tmls-ai/guino/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime/netpolicy"
 )
 
 // ToolHandler processes a tool call and returns a text result or an error.

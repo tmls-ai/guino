@@ -1,353 +1,89 @@
-<p align="center">
-  <h1 align="center">Den</h1>
-  <p align="center">Self-hosted sandbox runtime for AI agents</p>
-  <p align="center">
-    <a href="docs/docs/quick-start.md">Getting Started</a> &bull;
-    <a href="docs/api-reference.md">API Reference</a> &bull;
-    <a href="docs/docs/sdks.md">SDKs</a> &bull;
-    <a href="docs/docs/mcp.md">MCP Integration</a> &bull;
-    <a href="docs/docs/configuration.md">Configuration</a>
-  </p>
-  <p align="center">
-    <b>English</b> | <a href="README.zh-CN.md">中文</a>
-  </p>
-</p>
+# Guino
 
----
+**Local infrastructure for AI agents.**
 
-Den gives AI agents secure, isolated sandbox environments to execute code. It's the open-source, self-hosted alternative to E2B and similar cloud sandbox services.
+Run agent-generated code in Docker sandboxes on your own machine through a CLI, REST API, SDK or MCP interface. Guino needs no cloud account; once the binary and container images are installed, the local runtime works without internet access.
 
-**Single binary. Zero config. Works with any AI framework.**
+[Getting started](docs/docs/quick-start.md) · [Connect your agent](docs/docs/mcp.md) · [Documentation](docs/README.md) · [Security](SECURITY.md) · [中文](README.zh-CN.md)
 
-> **100 sandboxes on E2B = ~$600/hour. 100 sandboxes on Den = one $5/month server.**
+Guino is derived from [Den](https://github.com/us/den), with its Git history, authorship and existing license preserved. This checkout prepares the Guino relaunch; it does not imply that the upstream repository has transferred or redirects here. See the [migration status](docs/migration.md).
 
-```
-curl -sSL https://get.den.dev | sh
-den serve
-```
+## Start locally
 
-## What's New
-
-### Shared Resource Management (v0.0.6)
-
-- **Memory pressure monitoring** — Real-time 5-level pressure system (Normal → Warning → High → Critical → Emergency) with hysteresis
-- **Dynamic memory throttling** — Automatic per-container cgroup v2 `memory.high` adjustment based on host pressure
-- **Pressure-aware scheduling** — New sandboxes rejected at Critical/Emergency (HTTP 503)
-- **Resource status API** — `GET /api/v1/resources` for host memory, pressure level, and sandbox metrics
-- **Platform support** — Linux (direct cgroup v2, `/proc/meminfo`) and macOS (Docker API fallback)
-- **Auto-recovery** — Memory limits automatically removed when pressure drops
-
-### Storage Layer (v0.0.5)
-
-- **Persistent & shared volumes** — Docker named volumes, cross-sandbox mounting (RW/RO)
-- **S3 integration** — Hooks sync, on-demand import/export, FUSE mount
-- **Go, TypeScript (`@us4/den`), Python (`den-sdk`) SDKs** — Full storage type support
-
-See [CHANGELOG.md](CHANGELOG.md) for the full release history.
-
-## Why Den?
-
-AI agents need to run code, but running untrusted code on your machine is dangerous. Den solves this by providing:
-
-- **Isolated containers** — Each sandbox runs in its own Docker container with dropped capabilities, read-only rootfs, PID limits, and resource constraints
-- **Shared resource model** — Containers share host memory intelligently instead of fixed allocation. Dynamic pressure monitoring with auto-throttle (Google Borg / AWS Firecracker approach). 10x overcommit = 10x more sandboxes per dollar
-- **Simple REST API** — Create sandboxes, execute commands, read/write files, manage snapshots — all via HTTP
-- **WebSocket streaming** — Real-time command output for interactive use cases
-- **MCP server** — Native Model Context Protocol support for Claude, Cursor, and other AI tools
-- **Snapshot/Restore** — Save sandbox state and restore it later for reproducible environments
-- **Storage** — Persistent volumes, shared volumes, configurable tmpfs, and S3 integration
-- **Go + TypeScript + Python SDKs** — First-class client libraries
-
-## Installation
+Requirements: a running Docker daemon, access to its socket, and Go **1.25.7 or newer** for a source build. Run these commands from this checkout. Package registry releases, Homebrew and an installation domain are pending; the source build is the current installation path.
 
 ```bash
-# Go
-go get github.com/us/den@latest
+go build -o bin/guino ./cmd/guino
+docker pull ubuntu:24.04
 
-# TypeScript
-bun add @us4/den
-# or: npm install @us4/den
-
-# Python
-pip install den-sdk
-# or: uv add den-sdk
+# Local API with no sandbox networking and explicit resource limits.
+GUINO_SERVER__HOST=127.0.0.1 \
+GUINO_RUNTIME__DEFAULT_NETWORK_MODE=none \
+GUINO_SANDBOX__DEFAULT_CPU=1000000000 \
+GUINO_SANDBOX__DEFAULT_MEMORY=536870912 \
+./bin/guino serve
 ```
 
-## Quick Start
-
-### Prerequisites
-
-- Docker running locally
-- Go 1.21+ (to build from source)
-
-### Run the Server
+In another terminal, from the same checkout:
 
 ```bash
-# Build and run
-go build -o den ./cmd/den
-./den serve
-
-# Or with custom config
-./den serve --config den.yaml
+sandbox_id=$(./bin/guino create --image ubuntu:24.04 --timeout 300)
+./bin/guino exec "$sandbox_id" -- sh -c 'echo Hello from Guino'
+./bin/guino ls
+./bin/guino rm "$sandbox_id"
 ```
 
-### Create a Sandbox and Run Code
+The API and embedded dashboard are at `http://127.0.0.1:8080`. This quickstart is for a trusted local machine: API authentication is disabled by default. Read the [configuration guide](docs/docs/configuration.md) before exposing the server or enabling sandbox networking. Existing configuration or environment overrides still apply.
 
-```bash
-# Create a sandbox
-curl -X POST http://localhost:8080/api/v1/sandboxes \
-  -H 'Content-Type: application/json' \
-  -d '{"image": "ubuntu:22.04"}'
-# → {"id":"abc123","status":"running",...}
+## Connect your agent with MCP
 
-# Execute a command
-curl -X POST http://localhost:8080/api/v1/sandboxes/abc123/exec \
-  -H 'Content-Type: application/json' \
-  -d '{"cmd": ["python3", "-c", "print(2+2)"]}'
-# → {"exit_code":0,"stdout":"4\n","stderr":""}
+Guino includes a stdio MCP server. Your agent starts `guino mcp` and can create sandboxes, run commands, manage files and take snapshots. MCP runs the engine directly and does not require `guino serve`.
 
-# Write a file
-curl -X PUT 'http://localhost:8080/api/v1/sandboxes/abc123/files?path=/tmp/hello.py' \
-  -d 'print("Hello from sandbox!")'
-
-# Read a file
-curl 'http://localhost:8080/api/v1/sandboxes/abc123/files?path=/tmp/hello.py'
-
-# Destroy the sandbox
-curl -X DELETE http://localhost:8080/api/v1/sandboxes/abc123
+```text
+Claude Code / Codex / Cursor / another MCP client
+                    ↓ stdio
+                 guino mcp
+                    ↓ Docker
+               local sandboxes
 ```
 
-### Use with Go SDK
+Follow the [MCP setup](docs/docs/mcp.md) for the dedicated store and configuration, then use the guide for [Claude Code](docs/docs/claude-code.md), [Codex](docs/docs/codex.md), [Cursor](docs/docs/cursor.md) or a [generic client](docs/docs/custom-agents.md). Each runtime process needs exclusive ownership of its database and managed Docker resources; stop `serve` before switching that runtime to MCP.
 
-```go
-package main
+## What you can do
 
-import (
-    "context"
-    "fmt"
+| Capability | Included |
+|---|---|
+| Sandbox lifecycle | Create, list, inspect, stop and destroy Docker containers; automatic expiry |
+| Execution | Command output and exit status over REST; streaming over WebSocket |
+| Files | Read, write, list, upload and download sandbox files |
+| Snapshots | Docker image snapshots and restore; tmpfs and mounted-volume contents are separate |
+| Storage | Persistent/shared Docker volumes, configurable tmpfs, S3 import/export and hooks; optional FUSE |
+| Resources | CPU, memory and PID limits, host pressure monitoring and throttling |
+| Clients | CLI, Go, TypeScript and Python SDKs, and 11 MCP tools |
+| Operations | Embedded dashboard, API key authentication, rate limits and TLS configuration |
 
-    client "github.com/us/den/pkg/client"
-)
+All of these run on infrastructure you control. Guino Cloud is outside this migration; there are no account or billing dependencies in the local execution path.
 
-func main() {
-    c := client.New("http://localhost:8080", client.WithAPIKey("your-key"))
-    ctx := context.Background()
+## Isolation and trust
 
-    // Create sandbox
-    sb, _ := c.CreateSandbox(ctx, client.SandboxConfig{
-        Image: "ubuntu:22.04",
-    })
+Guino is intended for local development and self-hosted environments with a trusted operator. Containers share the Docker host's kernel. They are not a universal security boundary for mutually hostile tenants.
 
-    // Run code
-    result, _ := c.Exec(ctx, sb.ID, client.ExecOpts{
-        Cmd: []string{"echo", "Hello from Go SDK!"},
-    })
-    fmt.Println(result.Stdout)
+The runtime drops all Linux capabilities and adds back `NET_BIND_SERVICE`, `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE` and `FOWNER`. Root filesystems are read-only by default, with writable tmpfs/explicit mounts, `no-new-privileges` and a default PID limit of 256. CPU and memory defaults are **unlimited** unless configured; the quickstart sets explicit limits.
 
-    // Clean up
-    c.DestroySandbox(ctx, sb.ID)
-}
-```
+The default `internal` network still reaches the Docker bridge gateway, embedded DNS and host services. `none` disables external networking (container loopback remains); it does not remove kernel or shared-volume risks. Bridge mode enables unfiltered egress and requires an explicit opt-in. The [security model](SECURITY.md) documents these boundaries, authentication, Docker topology and S3 SSRF protection in detail.
 
-### Use with MCP (Claude Code, Cursor)
+## SDKs and documentation
 
-```bash
-# Start the MCP server (stdio mode)
-den mcp
-```
+[Go, TypeScript and Python SDK guide](docs/docs/sdks.md) includes source installation instructions. The intended package identities are `github.com/tmls-ai/guino`, `@tmls-ai/guino` and Python `guino`; publishing is pending.
 
-Add to your Claude Code config (`~/.claude/claude_desktop_config.json`):
+- [Getting started](docs/docs/quick-start.md) and [installation](docs/docs/installation.md)
+- [Core concepts](docs/docs/concepts.md): sandboxes, execution, files, networking, snapshots, volumes and storage
+- [Configuration](docs/docs/configuration.md), [resource management](docs/docs/resources.md) and [self-hosting](docs/docs/self-hosting.md)
+- [REST API](docs/api-reference.md), [CLI](docs/cli.md) and [MCP tools](docs/docs/mcp.md)
+- [Contributing](CONTRIBUTING.md), [roadmap](ROADMAP.md) and [release history](CHANGELOG.md)
 
-```json
-{
-  "mcpServers": {
-    "den": {
-      "command": "den",
-      "args": ["mcp"]
-    }
-  }
-}
-```
+## Project history and license
 
-Now Claude can create sandboxes, run code, and manage files directly.
+The original Den commits, tags, authors and historical changelog remain intact. Guino changes are new work on that foundation. Legacy configuration and SDK aliases are documented in the [migration guide](docs/migration.md).
 
-## Features
-
-| Feature | Description |
-|---------|-------------|
-| **Sandbox CRUD** | Create, list, get, stop, destroy containers |
-| **Command Execution** | Sync exec with exit code, stdout, stderr |
-| **Streaming Exec** | WebSocket-based real-time output |
-| **File Operations** | Read, write, list, mkdir, delete files inside sandboxes |
-| **File Upload/Download** | Multipart upload and direct download |
-| **Snapshots** | Save and restore sandbox state via `docker commit` |
-| **Persistent Volumes** | Docker named volumes that survive sandbox destruction |
-| **Shared Volumes** | Mount the same volume across sandboxes (RW or RO) |
-| **Configurable Tmpfs** | Per-sandbox tmpfs size and option overrides |
-| **S3 Sync** | Import/export files via hooks, on-demand API, or FUSE mount |
-| **Port Publishing** | Publish sandbox ports to `127.0.0.1` — fixed at creation, Docker-native, **only in `network_mode=bridge`** |
-| **Resource Limits** | CPU, memory, PID limits per sandbox |
-| **Pressure Monitoring** | Host memory pressure detection with dynamic throttling |
-| **Auto-Expiry** | Sandboxes auto-destroy after configurable timeout |
-| **Rate Limiting** | Per-key rate limiting on all API endpoints |
-| **API Key Auth** | Header-based authentication with constant-time comparison |
-| **MCP Server** | stdio-based Model Context Protocol for AI tool integration |
-| **Dashboard** | Embedded web UI for monitoring and management |
-
-## Security
-
-Den takes security seriously. Every sandbox runs with:
-
-- **Dropped capabilities** — `ALL` capabilities dropped, minimal set added back
-- **Read-only root filesystem** — Only tmpfs mounts and explicit volumes are writable
-- **PID limits** — Default 256 processes per container
-- **No new privileges** — `no-new-privileges` security option
-- **Network posture** — Managed Docker network in one of three modes: `internal` (default — no NAT/egress), `bridge` (egress + published ports), `none` (no interface). **`internal` does NOT contain a sandbox: it still reaches the bridge gateway, the embedded DNS resolver (`127.0.0.11`) and any host service bound to `0.0.0.0`. Only `network_mode=none` is a tenant/egress boundary.**
-- **Port binding** — Ports are published Docker-natively to `127.0.0.1` only, fixed at sandbox creation, and **only in `bridge` mode** (inert in `internal`, rejected in `none`). There is no userspace forwarder and no runtime add/remove (`POST`/`DELETE /ports` → `501`). The "Port Publishing" feature above is therefore live only in `bridge`; in the default `internal` mode it is intentionally inert.
-- **Bind guard** — When the API binds a non-loopback address (or loopback with auth disabled), startup **refuses** unless auth is enabled, the effective mode is `none`, or a co-residency `platform_override` is explicitly attested — preventing the unauthenticated control plane from being reachable from a `bridge`/`internal` sandbox
-- **S3 SSRF guard** — Den's S3 client refuses internal targets (cloud-metadata, link-local, loopback, RFC1918, CGNAT) by default; the configured endpoint's IP set is pinned at construction so a DNS rebind or redirect can't smuggle Den onto an internal host. Self-hosted MinIO is an explicit, loudly-logged opt-in (`s3.allow_internal_endpoint`)
-- **Path validation** — Null byte and traversal protection on all file operations
-- **Dynamic memory throttling** — cgroup v2 `memory.high` based throttling instead of hard kills; 5-level pressure system with auto-recovery
-- **Constant-time auth** — API key comparison resistant to timing attacks
-- **No error leaking** — Internal errors are logged, generic messages returned to clients
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────┐
-│                    Clients                           │
-│  CLI  │  Go SDK  │  TS SDK  │  Python SDK  │  MCP   │
-└───────┴──────────┴──────────┴──────────────┴────────┘
-                          │
-                    ┌─────┴─────┐
-                    │  HTTP API  │  chi router + middleware
-                    │  WebSocket │  gorilla/websocket
-                    └─────┬─────┘
-                          │
-                    ┌─────┴─────┐
-                    │  Engine   │  Lifecycle, reaper, pressure
-                    └──┬────┬──┘
-                       │    │
-          ┌────────────┘    └────────────┐
-  ┌───────┴───────┐           ┌──────────┴─────────┐
-  │ Docker Runtime│           │  Storage Layer     │
-  │  Docker SDK   │           │  Volumes, S3, Tmpfs│
-  └───────┬───────┘           └──────────┬─────────┘
-          │                              │
-  ┌───────┴───────┐           ┌──────────┴─────────┐
-  │   Containers  │           │  S3 / MinIO        │
-  │  (sandboxes)  │           │  Docker Volumes    │
-  └───────────────┘           └────────────────────┘
-```
-
-## Performance
-
-Benchmarked on Apple Silicon (M-series):
-
-| Operation | Latency | Notes |
-|-----------|---------|-------|
-| API health check | < 1ms | Near-zero overhead |
-| Create sandbox | ~100ms | Cold start; warm pool brings this to ~5ms |
-| Execute command | ~20-30ms | Including Docker exec round-trip |
-| Read file | ~28-30ms | Exec-based file I/O |
-| Write file | ~56-70ms | Exec-based with auto-mkdir |
-| Destroy sandbox | ~1s | SIGTERM + cleanup |
-| Parallel create (5x) | ~42ms/each | Concurrent container creation |
-| Parallel exec (10x) | ~7ms/each | Concurrent command execution |
-
-### vs. Alternatives
-
-| | **Den** | E2B | Daytona | Modal |
-|---|---|---|---|---|
-| Sandbox create | **~100ms** | ~150ms | ~90ms | 2-5s |
-| Pricing | **Free** | $0.10/min+ | Free (complex) | $0.10/min+ |
-| Max sandboxes/server | **100+ (shared resources)** | ~10 (dedicated) | ~10 (K8s pods) | N/A (cloud) |
-| Setup | **`curl \| sh`** | SDK + API key | Docker + K8s | SDK + API key |
-| Self-hosted | **Easy (single binary)** | Hard (Firecracker+Nomad) | Heavy (K8s) | No |
-| Offline | **Yes** | No | Partial | No |
-| License | AGPL-3.0 | Apache-2.0 | Apache-2.0 | Proprietary |
-
-## Documentation
-
-- [Getting Started](docs/docs/quick-start.md) — Installation, first sandbox, basic usage
-- [API Reference](docs/api-reference.md) — Complete REST API documentation
-- [Configuration](docs/docs/configuration.md) — All config options explained
-- [SDK Guide](docs/docs/sdks.md) — Go, TypeScript, and Python client libraries
-- [MCP Integration](docs/docs/mcp.md) — Using Den with AI tools
-- [Architecture](docs/docs/architecture.md) — Internal design and security model
-- [CLI Reference](docs/cli.md) — Command-line interface
-
-## CLI
-
-```
-den serve                         # Start API server
-den create --image ubuntu:22.04   # Create sandbox
-den ls                            # List sandboxes
-den exec <id> -- echo hello       # Execute command
-den rm <id>                       # Destroy sandbox
-den snapshot create <id>          # Create snapshot
-den snapshot restore <snap-id>    # Restore snapshot
-den stats                         # System stats
-den mcp                           # Start MCP server
-den version                       # Version info
-```
-
-## Configuration
-
-```yaml
-server:
-  host: "0.0.0.0"
-  port: 8080
-  rate_limit_rps: 10
-  rate_limit_burst: 20
-
-sandbox:
-  default_image: "ubuntu:22.04"
-  default_timeout: "30m"
-  max_sandboxes: 50
-  default_memory: 536870912  # 512MB
-  allow_volumes: true
-  allow_s3: true
-  max_volumes_per_sandbox: 5
-
-s3:
-  endpoint: "http://localhost:9000"  # MinIO or S3-compatible
-  region: "us-east-1"
-  access_key: "minioadmin"
-  secret_key: "minioadmin"
-  # Required for a localhost/LAN endpoint: the SSRF guard blocks every
-  # internal range by default. Opts ONLY this endpoint back in. See
-  # docs/docs/configuration.md → "S3 endpoint SSRF guard".
-  allow_internal_endpoint: true
-
-auth:
-  enabled: true
-  api_keys:
-    - "your-secret-key"
-
-resource:
-  overcommit_ratio: 10.0
-  monitor_interval: "5s"
-  enable_auto_throttle: true
-```
-
-See [Configuration Guide](docs/docs/configuration.md) for all options.
-
-## Contributing
-
-```bash
-# Clone and build
-git clone https://github.com/us/den
-cd den
-go build ./cmd/den
-
-# Run tests
-go test ./internal/... -race
-
-# Run with race detector
-go test ./internal/... -count=1 -race -v
-```
-
-## License
-
-AGPL-3.0 — See [LICENSE](LICENSE) for details.
+The runtime remains **AGPL-3.0**; see [LICENSE](LICENSE). Existing SDK package metadata retains its original MIT declarations. This rename does not relicense existing code or transfer contributors' copyright.

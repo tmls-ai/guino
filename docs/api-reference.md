@@ -4,6 +4,8 @@ title: API Reference
 
 # API Reference
 
+S3/MinIO examples assume the operator has configured a trusted server-side `s3.endpoint`, credentials and `s3.allow_internal_endpoint: true` when that endpoint is private. Requests omit `endpoint` to inherit the configured endpoint: per-request overrides are refused while that exemption is active.
+
 All endpoints are served under `/api/v1/`. Responses are JSON unless otherwise noted.
 
 ## Authentication
@@ -72,12 +74,12 @@ Request body:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `image` | string | `ubuntu:22.04` | Docker image to use |
+| `image` | string | `guino/default:latest` | Docker image to use |
 | `env` | object | `{}` | Environment variables |
 | `workdir` | string | `""` | Working directory |
 | `timeout` | int | `1800` | Auto-expiry in seconds (default 30 min) |
-| `cpu` | int | `1000000000` | CPU limit in NanoCPUs (1 core = 1e9) |
-| `memory` | int | `536870912` | Memory limit in bytes (default 512MB) |
+| `cpu` | int | `0` | CPU limit in NanoCPUs (1 core = 1e9) |
+| `memory` | int | `0` | Memory limit in bytes; default 0 means unlimited |
 | `ports` | array | `[]` | Port mappings (set `host_port: 0` for auto-assign) |
 | `storage` | object | `null` | Storage configuration (see below) |
 
@@ -104,7 +106,6 @@ Response `201 Created`:
       {"path": "/tmp", "size": "128m", "options": "rw,noexec,nosuid"}
     ],
     "s3": {
-      "endpoint": "http://minio:9000",
       "bucket": "my-bucket",
       "prefix": "sandbox-data/",
       "access_key": "minioadmin",
@@ -428,7 +429,6 @@ Request body:
   "bucket": "my-bucket",
   "key": "data/input.csv",
   "dest_path": "/home/sandbox/input.csv",
-  "endpoint": "http://minio:9000",
   "access_key": "minioadmin",
   "secret_key": "minioadmin",
   "region": "us-east-1"
@@ -472,7 +472,6 @@ Request body:
   "source_path": "/home/sandbox/output.csv",
   "bucket": "my-bucket",
   "key": "results/output.csv",
-  "endpoint": "http://minio:9000",
   "access_key": "minioadmin",
   "secret_key": "minioadmin"
 }

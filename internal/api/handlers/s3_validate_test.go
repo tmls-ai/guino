@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/us/den/internal/config"
+	"github.com/tmls-ai/guino/internal/config"
 )
 
 // TestS3Handler_validateEndpoint exercises the exemption-aware early SSRF

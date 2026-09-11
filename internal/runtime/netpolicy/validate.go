@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/us/den/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime"
 )
 
 // denLabelPrefix is the reserved label namespace. Callers may not set it; the

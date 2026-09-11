@@ -14,11 +14,11 @@ import (
 
 	"github.com/rs/xid"
 
-	"github.com/us/den/internal/config"
-	"github.com/us/den/internal/runtime"
-	"github.com/us/den/internal/runtime/netpolicy"
-	"github.com/us/den/internal/storage"
-	"github.com/us/den/internal/store"
+	"github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime/netpolicy"
+	"github.com/tmls-ai/guino/internal/storage"
+	"github.com/tmls-ai/guino/internal/store"
 )
 
 var (
@@ -853,7 +853,13 @@ func (e *Engine) s3UploadDir(ctx context.Context, id string, client *storage.S3C
 			continue
 		}
 
-		key := prefix + strings.TrimPrefix(f.Path, basePath)
+		// Join the configured prefix and relative path with one separator;
+		// a trailing slash in Prefix must not create an unreachable // key.
+		relative := strings.TrimPrefix(strings.TrimPrefix(f.Path, basePath), "/")
+		key := relative
+		if prefix != "" {
+			key = strings.TrimRight(prefix, "/") + "/" + relative
+		}
 		if err := client.Upload(ctx, bucket, key, bytes.NewReader(data), int64(len(data))); err != nil {
 			e.logger.Warn("s3 hook: failed to upload file", "key", key, "error", err)
 		}

@@ -8,10 +8,10 @@ import (
 	"os"
 	goruntime "runtime"
 
-	"github.com/us/den/internal/config"
-	"github.com/us/den/internal/runtime"
-	"github.com/us/den/internal/runtime/docker"
-	"github.com/us/den/internal/runtime/netpolicy"
+	"github.com/tmls-ai/guino/internal/config"
+	"github.com/tmls-ai/guino/internal/runtime"
+	"github.com/tmls-ai/guino/internal/runtime/docker"
+	"github.com/tmls-ai/guino/internal/runtime/netpolicy"
 )
 
 // startupSteps are the ordered, fail-fast startup actions shared verbatim by
@@ -39,10 +39,10 @@ func runStartup(ctx context.Context, s startupSteps) error {
 		return err
 	}
 	if err := s.reconcile(ctx); err != nil {
-		return fmt.Errorf("reconciling den network: %w", err)
+		return fmt.Errorf("reconciling Guino network: %w", err)
 	}
 	if err := s.ensureNet(ctx); err != nil {
-		return fmt.Errorf("ensuring den network: %w", err)
+		return fmt.Errorf("ensuring Guino network: %w", err)
 	}
 	return nil
 }
@@ -63,11 +63,11 @@ type platformProbe func(context.Context, *docker.DockerRuntime) (netpolicy.Runti
 // applyNetworkGuardsWithProbe, by the bare identifier `realPlatformProbe`.
 //
 // SECURITY-INVARIANT: guard_ast_test.go parses every non-_test.go file in
-// cmd/den and enforces three equalities — (ii-a) the wrapper's probe argument
+// cmd/guino and enforces three equalities — (ii-a) the wrapper's probe argument
 // is the exact identifier `realPlatformProbe`, (ii-b) that name resolves to
 // exactly one top-level FuncDecl and is never a binding occurrence, and
 // (ii-c) the PlatformLinuxNativeDocker assignment carries the same-line
-// //den:attested-platform-assignment marker — so the pinned spelling is the
+// //guino:attested-platform-assignment marker — so the pinned spelling is the
 // pinned value by construction. Deleting or renaming this function, or
 // substituting a stub at the call site, fails that test. Do not remove the
 // marker comment below or the AST exemption stops covering this assignment.
@@ -93,7 +93,7 @@ func applyNetworkGuards(ctx context.Context, rt *docker.DockerRuntime, cfg *conf
 
 // applyNetworkGuardsWithProbe is applyNetworkGuards with the platform probe
 // injected, so guard_test.go can prove the positive platform_override branch
-// (override attested ⇒ den STARTS + committed ERROR attestation logged) and
+// (override attested ⇒ Guino STARTS + committed ERROR attestation logged) and
 // the refusal/probe-error branches deterministically with a fake probe.
 //
 // httpListener reports whether this process exposes the HTTP control plane
@@ -101,7 +101,7 @@ func applyNetworkGuards(ctx context.Context, rt *docker.DockerRuntime, cfg *conf
 // security-critical ERROR-level opt-in disclosures, which describe the HTTP
 // control-plane exposure — are a no-op without an HTTP listener. The
 // bridge-refusal guard and the non-fatal Warnings ALWAYS run: a bridge
-// sandbox has unfiltered egress regardless of whether den exposes an HTTP API.
+// sandbox has unfiltered egress regardless of whether Guino exposes an HTTP API.
 //
 // On refusal it writes the committed netpolicy message to stderr and returns a
 // non-nil error so the caller exits non-zero.
@@ -134,7 +134,7 @@ func applyNetworkGuardsWithProbe(ctx context.Context, rt *docker.DockerRuntime, 
 		// override as a true platform fact.
 		guardPlatform := platform
 		if attested {
-			guardPlatform = netpolicy.PlatformLinuxNativeDocker //den:attested-platform-assignment
+			guardPlatform = netpolicy.PlatformLinuxNativeDocker //guino:attested-platform-assignment
 		}
 		safe := netpolicy.BindGuardDecision(
 			cfg.Auth.Enabled,
