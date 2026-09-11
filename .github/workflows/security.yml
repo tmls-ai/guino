@@ -34,3 +34,6 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build_mode }}
       - uses: github/codeql-action/analyze@v3
+        with:
+          # Keep result identity stable when matrix build modes change.
+          category: .github/workflows/security.yml:codeql/language:${{ matrix.language }}

@@ -31,7 +31,9 @@ func TestIntegration_MigrationSmoke(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "guino")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	build := exec.CommandContext(ctx, "go", "build", "-o", bin, "./cmd/guino")
+	// This smoke checks API/MCP compatibility, not embedded VCS metadata. The
+	// CI container may not be able to read the bind-mounted checkout's Git state.
+	build := exec.CommandContext(ctx, "go", "build", "-buildvcs=false", "-o", bin, "./cmd/guino")
 	build.Dir = root
 	output, err := build.CombinedOutput()
 	require.NoError(t, err, "build Guino: %s", output)
