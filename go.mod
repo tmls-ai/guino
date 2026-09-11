@@ -1,6 +1,6 @@
 module github.com/tmls-ai/guino
 
-go 1.25.7
+go 1.26.0
 
 require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.10
@@ -20,7 +20,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/bbolt v1.4.3
-	golang.org/x/sys v0.35.0
+	golang.org/x/sys v0.48.0
 	golang.org/x/time v0.11.0
 )
 
