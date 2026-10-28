@@ -11,6 +11,16 @@ import (
 	"github.com/tmls-ai/guino/internal/runtime"
 )
 
+// catError classifies a failed `cat`. It says "No such file or directory" for a
+// missing path and something else for an unreadable one; only the first is a
+// 404, and it is the common case by far.
+func catError(path, id, stderr string) error {
+	if strings.Contains(stderr, "No such file or directory") {
+		return fmt.Errorf("%s in %s: %w", path, id, runtime.ErrFileNotFound)
+	}
+	return fmt.Errorf("reading file %s in %s: %s", path, id, stderr)
+}
+
 // ReadFile reads a file from the container using exec-based cat approach.
 // Uses exec instead of CopyFromContainer because the latter fails with read-only rootfs.
 func (r *DockerRuntime) ReadFile(ctx context.Context, id string, path string) ([]byte, error) {
@@ -21,7 +31,7 @@ func (r *DockerRuntime) ReadFile(ctx context.Context, id string, path string) ([
 		return nil, fmt.Errorf("reading file %s in %s: %w", path, id, err)
 	}
 	if result.ExitCode != 0 {
-		return nil, fmt.Errorf("reading file %s in %s: %s", path, id, result.Stderr)
+		return nil, catError(path, id, result.Stderr)
 	}
 
 	content := []byte(result.Stdout)

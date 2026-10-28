@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -26,6 +27,9 @@ var (
 	ErrNotRunning      = errors.New("sandbox is not running")
 	ErrLimitReached    = errors.New("maximum sandbox limit reached")
 	ErrPressureTooHigh = errors.New("host under critical memory pressure")
+	// ErrHostBindRejected is a host bind the server refuses: disabled, or outside
+	// every allowed root. The caller's to fix, so the API answers 422.
+	ErrHostBindRejected = errors.New("host bind rejected")
 )
 
 // Engine orchestrates sandbox lifecycle.
@@ -252,6 +256,19 @@ func (e *Engine) CreateSandbox(ctx context.Context, cfg runtime.SandboxConfig) (
 	if cfg.PidLimit == 0 {
 		cfg.PidLimit = e.config.DefaultPidLimit
 	}
+	// Host binds are validated before anything is created, so a refused bind is a
+	// failed create rather than a running sandbox with a missing folder. The
+	// resolved values replace the request in-place: the Docker boundary mounts
+	// what it is handed, so nothing unvalidated may reach it.
+	if len(cfg.HostBinds) > 0 {
+		resolved, err := e.resolveHostBinds(cfg.HostBinds)
+		if err != nil {
+			e.decrementCount()
+			return nil, err
+		}
+		cfg.HostBinds = resolved
+	}
+
 	timeout := cfg.Timeout
 	if timeout == 0 {
 		timeout = e.config.DefaultTimeout
@@ -276,6 +293,7 @@ func (e *Engine) CreateSandbox(ctx context.Context, cfg runtime.SandboxConfig) (
 		CreatedAt: time.Now().UTC(),
 	}
 	if timeout > 0 {
+		sandbox.Timeout = timeout
 		sandbox.ExpiresAt = sandbox.CreatedAt.Add(timeout)
 	}
 
@@ -416,6 +434,39 @@ func (e *Engine) DestroySandbox(ctx context.Context, id string) error {
 	return nil
 }
 
+// resolveHostBinds validates each requested bind against the operator's roots.
+func (e *Engine) resolveHostBinds(requested []runtime.HostBind) ([]runtime.HostBind, error) {
+	if !e.netPolicy.HostBindsEnabled {
+		return nil, fmt.Errorf("%w: host binds are disabled on this server (sandbox.allow_host_binds)", ErrHostBindRejected)
+	}
+	out := make([]runtime.HostBind, 0, len(requested))
+	for _, b := range requested {
+		got, err := netpolicy.ValidateHostBind(
+			netpolicy.HostBindRequest{
+				HostPath:  b.HostPath,
+				MountPath: b.MountPath,
+				ReadOnly:  b.ReadOnly,
+			},
+			e.netPolicy.HostBindRoots,
+			filepath.EvalSymlinks,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrHostBindRejected, err)
+		}
+		// Directories only: a root that holds a socket (a user's
+		// ~/.docker/run/docker.sock) must not hand that socket out on its own.
+		if fi, err := os.Stat(got.HostPath); err != nil || !fi.IsDir() {
+			return nil, fmt.Errorf("%w: host_path %q is not a directory", ErrHostBindRejected, b.HostPath)
+		}
+		out = append(out, runtime.HostBind{
+			HostPath:  got.HostPath,
+			MountPath: got.MountPath,
+			ReadOnly:  got.ReadOnly,
+		})
+	}
+	return out, nil
+}
+
 // requireRunning returns nil if the sandbox exists and is running, or the
 // reason it is not (not-found / not-running). Callers only need the gate, not
 // the sandbox value.
@@ -427,6 +478,11 @@ func (e *Engine) requireRunning(id string) error {
 	if sb.GetStatus() != runtime.StatusRunning {
 		return ErrNotRunning
 	}
+	// Every operation *on* a running sandbox is activity, and they all pass
+	// through here — exec, streams, files, and sessions via Exec. Deliberately
+	// not in GetSandbox or Info: a dashboard polling status would otherwise keep
+	// an abandoned sandbox alive forever, which is the opposite of the point.
+	sb.Touch()
 	return nil
 }
 
@@ -434,6 +490,9 @@ func (e *Engine) requireRunning(id string) error {
 func (e *Engine) Exec(ctx context.Context, id string, opts runtime.ExecOpts) (*runtime.ExecResult, error) {
 	if err := e.requireRunning(id); err != nil {
 		return nil, err
+	}
+	if sb, err := e.GetSandbox(id); err == nil {
+		defer sb.Hold()()
 	}
 	return e.runtime.Exec(ctx, id, opts)
 }
@@ -443,7 +502,26 @@ func (e *Engine) ExecStream(ctx context.Context, id string, opts runtime.ExecOpt
 	if err := e.requireRunning(id); err != nil {
 		return nil, err
 	}
-	return e.runtime.ExecStream(ctx, id, opts)
+	stream, err := e.runtime.ExecStream(ctx, id, opts)
+	if err != nil {
+		return nil, err
+	}
+	sb, err := e.GetSandbox(id)
+	if err != nil {
+		return stream, nil
+	}
+	return &heldStream{ExecStream: stream, release: sb.Hold()}, nil
+}
+
+// heldStream keeps its sandbox from expiring until the stream is closed.
+type heldStream struct {
+	runtime.ExecStream
+	release func()
+}
+
+func (s *heldStream) Close() error {
+	s.release()
+	return s.ExecStream.Close()
 }
 
 // ReadFile reads a file from a sandbox.
@@ -683,7 +761,17 @@ func (e *Engine) restoreFromStore() {
 			status:    info.Status,
 			CreatedAt: r.CreatedAt,
 			ExpiresAt: r.ExpiresAt,
+			Timeout:   r.Timeout,
 		}
+		// Records written before Timeout was persisted held a fixed deadline of
+		// created+timeout, which recovers the window exactly.
+		if sandbox.Timeout == 0 && !r.ExpiresAt.IsZero() {
+			sandbox.Timeout = r.ExpiresAt.Sub(r.CreatedAt)
+		}
+		// Touches are not persisted, so the stored deadline is stale. A restart
+		// is not idleness: give each sandbox a fresh window rather than reaping
+		// one that was in use a moment ago. No-op for records without a Timeout.
+		sandbox.Touch()
 		e.sandboxes.Store(r.ID, sandbox)
 		e.count++
 		restored++
@@ -701,7 +789,8 @@ func (e *Engine) saveSandbox(sandbox *Sandbox) error {
 		Image:     sandbox.Image,
 		Status:    string(sandbox.GetStatus()),
 		CreatedAt: sandbox.CreatedAt,
-		ExpiresAt: sandbox.ExpiresAt,
+		ExpiresAt: sandbox.Expiry(),
+		Timeout:   sandbox.Timeout,
 	})
 }
 

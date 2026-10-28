@@ -512,8 +512,8 @@ func toolListSandboxes(s *Server) ToolDef {
 					"status":     string(sb.GetStatus()),
 					"created_at": sb.CreatedAt.Format(time.RFC3339),
 				}
-				if !sb.ExpiresAt.IsZero() {
-					entry["expires_at"] = sb.ExpiresAt.Format(time.RFC3339)
+				if exp := sb.Expiry(); !exp.IsZero() {
+					entry["expires_at"] = exp.Format(time.RFC3339)
 				}
 				list = append(list, entry)
 			}

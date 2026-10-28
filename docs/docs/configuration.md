@@ -18,6 +18,8 @@ server:
     - "http://localhost:8080"
   rate_limit_rps: 10
   rate_limit_burst: 20
+  rate_limit_proxy_rps: 200       # sandbox proxy traffic; 0 reuses the limits above
+  rate_limit_proxy_burst: 400
   tls:
     enabled: false
     cert_file: ""
@@ -32,6 +34,7 @@ runtime:
   allow_unsafe_bridge: false     # required to start with bridge
   allow_unsafe_bind: false       # dangerous last-resort; disables bind guard
   platform_override: ""          # "" or "linux-native-docker-co-resident"
+  egress_profile: "open"         # open | desktop (see "Egress profile" below)
 
 sandbox:
   default_image: "ubuntu:22.04"
@@ -45,7 +48,8 @@ sandbox:
   allow_shared_volumes: true
   allow_s3: true
   allow_s3_fuse: false
-  allow_host_binds: false        # NEVER enable in production
+  allow_host_binds: false        # needs auth + loopback; see "Host binds" below
+  host_bind_roots: []            # e.g. [{path: "/home/me/shared", read_only: true}]
   max_volumes_per_sandbox: 5
   default_tmpfs:
     - path: "/tmp"
@@ -135,6 +139,40 @@ may only **increase** isolation, never decrease it. Any other per-sandbox value
 is no egress filter in v1, so every bridge sandbox gets NAT'd, unfiltered egress
 to RFC1918, link-local metadata and any host service. This refusal runs in
 **both** `serve` and `mcp` mode.
+
+### Egress profile
+
+`runtime.egress_profile` is `open` (default: no rules, the behaviour described
+above) or `desktop`. `desktop` is for a dedicated sandbox VM where Guino runs as
+root next to the Docker daemon. At startup it installs iptables rules, scoped to
+the managed network's bridge interface, that:
+
+- drop sandbox traffic to `10/8`, `172.16/12`, `192.168/16`, `100.64/10`,
+  `169.254/16` (cloud metadata included), `127/8`, `0/8`, `224/4` and `240/4`;
+- still allow DNS (udp and tcp 53) to the VM's default gateway, which the
+  hypervisor hands out as the resolver;
+- drop sandbox traffic to Guino's own `server.port` on any local address, so a
+  sandbox cannot reach the control plane through the bridge gateway.
+
+Rules live in the `GUINO-EGRESS` (jumped to from `DOCKER-USER`) and
+`GUINO-EGRESS-HOST` (from `INPUT`) chains and are reinstalled idempotently on every
+start, in both `serve` and `mcp` mode. If they cannot be installed (not root, no
+iptables, Docker Desktop, or a bridge interface that is not in Guino's network
+namespace) Guino **refuses to start** rather than run without them. Both chains
+are written in one `iptables-restore --noflush` commit and the jumps are only added
+when missing, so a restart never leaves running sandboxes unfiltered. IPv4 only: the managed network is created with IPv6 disabled.
+Switching back to `open` does not remove the chains; delete them by hand or reboot
+the VM.
+
+### Host binds
+
+`sandbox.allow_host_binds: true` lets a create request mount host directories,
+but only inside `sandbox.host_bind_roots`. Paths are compared after resolving
+symlinks, only directories can be bound, a request can narrow a root or make it
+read-only but never widen it, and `/`, system paths such as `/etc`, `/sys`,
+`/var/run` or `/var/lib/docker`, anything inside them and any ancestor of them are
+refused (as a root at startup, and as a bind). `serve` refuses to start with host binds enabled unless
+`auth.enabled` is true and `server.host` is a loopback address.
 
 ### The bind guard
 

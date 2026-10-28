@@ -70,6 +70,10 @@ func mcpCmd() *cobra.Command {
 				guard:     func(c context.Context) error { return applyNetworkGuards(c, rt, cfg, logger, false) },
 				reconcile: func(c context.Context) error { return rt.Reconcile(c, st) },
 				ensureNet: rt.EnsureNetwork,
+				// A configured egress profile protects MCP sandboxes too.
+				egress: func(c context.Context) error {
+					return applyEgressProfile(c, rt, cfg, logger, realIptables)
+				},
 			}); err != nil {
 				return err
 			}

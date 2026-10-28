@@ -44,7 +44,11 @@ type ServerConfig struct {
 	AllowedOrigins []string `koanf:"allowed_origins"`
 	RateLimitRPS   float64  `koanf:"rate_limit_rps"`
 	RateLimitBurst int      `koanf:"rate_limit_burst"`
-	TLS            struct {
+	// Sandbox proxy traffic, rate limited separately from control-plane calls.
+	// Zero means "reuse the control-plane limits".
+	RateLimitProxyRPS   float64 `koanf:"rate_limit_proxy_rps"`
+	RateLimitProxyBurst int     `koanf:"rate_limit_proxy_burst"`
+	TLS                 struct {
 		Enabled  bool   `koanf:"enabled"`
 		CertFile string `koanf:"cert_file"`
 		KeyFile  string `koanf:"key_file"`
@@ -61,6 +65,12 @@ type RuntimeConfig struct {
 	// "internal" (default), "bridge", or "none". Empty is treated as
 	// "internal" for backward compatibility.
 	DefaultNetworkMode string `koanf:"default_network_mode"`
+	// EgressProfile is "open" (default, and the historical behaviour) or
+	// "desktop", which blocks private, link-local and other special-purpose
+	// address space so a sandbox on a laptop cannot reach the user's router,
+	// NAS or the cloud metadata endpoint. See internal/runtime/netpolicy/egress.go
+	// for why it is a denylist rather than an allowlist.
+	EgressProfile string `koanf:"egress_profile"`
 	// ReconcileNetwork enables operator-initiated, spoof-resistant
 	// destruction+recreation of the managed network when its mode changed.
 	ReconcileNetwork bool `koanf:"reconcile_network"`
@@ -85,20 +95,32 @@ type TmpfsDefault struct {
 
 // SandboxConfig holds default sandbox settings.
 type SandboxConfig struct {
-	DefaultImage         string         `koanf:"default_image"`
-	DefaultTimeout       time.Duration  `koanf:"default_timeout"`
-	MaxSandboxes         int            `koanf:"max_sandboxes"`
-	DefaultCPU           int64          `koanf:"default_cpu"`    // NanoCPUs
-	DefaultMemory        int64          `koanf:"default_memory"` // bytes
-	DefaultPidLimit      int64          `koanf:"default_pid_limit"`
-	WarmPoolSize         int            `koanf:"warm_pool_size"`
-	AllowVolumes         bool           `koanf:"allow_volumes"`
-	AllowSharedVolumes   bool           `koanf:"allow_shared_volumes"`
-	AllowS3              bool           `koanf:"allow_s3"`
-	AllowS3FUSE          bool           `koanf:"allow_s3_fuse"`
+	DefaultImage       string        `koanf:"default_image"`
+	DefaultTimeout     time.Duration `koanf:"default_timeout"`
+	MaxSandboxes       int           `koanf:"max_sandboxes"`
+	DefaultCPU         int64         `koanf:"default_cpu"`    // NanoCPUs
+	DefaultMemory      int64         `koanf:"default_memory"` // bytes
+	DefaultPidLimit    int64         `koanf:"default_pid_limit"`
+	WarmPoolSize       int           `koanf:"warm_pool_size"`
+	AllowVolumes       bool          `koanf:"allow_volumes"`
+	AllowSharedVolumes bool          `koanf:"allow_shared_volumes"`
+	AllowS3            bool          `koanf:"allow_s3"`
+	AllowS3FUSE        bool          `koanf:"allow_s3_fuse"`
+	// AllowHostBinds was a declared flag with no implementation: setting it did
+	// nothing at all. It now gates real binds, and on its own still grants
+	// nothing — HostBindRoots is what a sandbox may ask from, and a request can
+	// only narrow a root, never widen it.
 	AllowHostBinds       bool           `koanf:"allow_host_binds"`
+	HostBindRoots        []HostBindRoot `koanf:"host_bind_roots"`
 	MaxVolumesPerSandbox int            `koanf:"max_volumes_per_sandbox"`
 	DefaultTmpfs         []TmpfsDefault `koanf:"default_tmpfs"`
+}
+
+// HostBindRoot is a host directory sandboxes may bind from. Mirrors
+// netpolicy.HostBindRoot field for field (config stays an import leaf).
+type HostBindRoot struct {
+	Path     string `koanf:"path"`
+	ReadOnly bool   `koanf:"read_only"`
 }
 
 // S3Config holds server-wide S3 defaults.
@@ -160,6 +182,11 @@ func DefaultConfig() *Config {
 			AllowedOrigins: []string{"http://localhost:8080", "http://127.0.0.1:8080"},
 			RateLimitRPS:   10,
 			RateLimitBurst: 20,
+			// Proxied sandbox traffic only. A preview page or a noVNC session is
+			// dozens of asset requests in one burst from a single address, which the
+			// control-plane limit above would reject on sight.
+			RateLimitProxyRPS:   200,
+			RateLimitProxyBurst: 400,
 		},
 		Runtime: RuntimeConfig{
 			Backend: "docker",
@@ -265,6 +292,17 @@ func (c *Config) Validate() error {
 		// ok
 	default:
 		return fmt.Errorf("invalid runtime.default_network_mode %q: must be internal, bridge, or none", c.Runtime.DefaultNetworkMode)
+	}
+
+	// Egress profile enum. "" is accepted and treated as "open".
+	switch c.Runtime.EgressProfile {
+	case "", "open", "desktop":
+		// ok
+	default:
+		return fmt.Errorf("invalid runtime.egress_profile %q: must be open or desktop", c.Runtime.EgressProfile)
+	}
+	if c.Server.RateLimitProxyRPS < 0 || c.Server.RateLimitProxyBurst < 0 {
+		return fmt.Errorf("rate_limit_proxy_rps and rate_limit_proxy_burst must be non-negative")
 	}
 
 	// platform_override accepts exactly "" or the single co-residency

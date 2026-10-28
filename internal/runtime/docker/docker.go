@@ -139,6 +139,28 @@ func (r *DockerRuntime) SystemInfo(ctx context.Context) (system.Info, error) {
 	return r.cli.Info(ctx)
 }
 
+// BridgeInterface returns the host-side interface of a bridge network, which the
+// desktop egress profile scopes its rules to.
+func (r *DockerRuntime) BridgeInterface(ctx context.Context, name string) (string, error) {
+	insp, err := r.cli.NetworkInspect(ctx, name, network.InspectOptions{})
+	if err != nil {
+		return "", err
+	}
+	return bridgeInterfaceName(insp.ID, insp.Options)
+}
+
+// bridgeInterfaceName is the com.docker.network.bridge.name option when set (the
+// default "bridge" network is docker0), else Docker's br-<first 12 of the ID>.
+func bridgeInterfaceName(id string, options map[string]string) (string, error) {
+	if name := options["com.docker.network.bridge.name"]; name != "" {
+		return name, nil
+	}
+	if len(id) < 12 {
+		return "", fmt.Errorf("network has an unexpected id %q", id)
+	}
+	return "br-" + id[:12], nil
+}
+
 // NetworkMode returns the configured global default network mode.
 func (r *DockerRuntime) NetworkMode() runtime.NetworkMode {
 	return r.networkMode
@@ -292,6 +314,19 @@ func buildContainerCreateSpec(id string, cfg runtime.SandboxConfig, networkID st
 	}
 
 	var mounts []dockermount.Mount
+	for _, bind := range cfg.HostBinds {
+		// Already validated and resolved by the engine against the operator's
+		// allowed roots. Mounted with BindOptions.NonRecursive so a nested mount
+		// the user has inside the shared folder (a network share, an external
+		// disk) does not silently come along with it.
+		mounts = append(mounts, dockermount.Mount{
+			Type:        dockermount.TypeBind,
+			Source:      bind.HostPath,
+			Target:      bind.MountPath,
+			ReadOnly:    bind.ReadOnly,
+			BindOptions: &dockermount.BindOptions{NonRecursive: true},
+		})
+	}
 	if cfg.Storage != nil {
 		for _, vol := range cfg.Storage.Volumes {
 			mounts = append(mounts, dockermount.Mount{
@@ -366,6 +401,15 @@ func (r *DockerRuntime) Create(ctx context.Context, id string, cfg runtime.Sandb
 	containerName := "den-" + id
 
 	if _, err := r.cli.ContainerCreate(ctx, containerCfg, hostCfg, networkCfg, nil, containerName); err != nil {
+		// ContainerCreate never pulls, which is the behaviour a desktop install
+		// wants — an offline machine must fail fast rather than hang on a registry.
+		// But the daemon's own wording ("No such image") sends people looking for a
+		// bug in Guino, so name the actual situation and the actual fix.
+		if cerrdefs.IsNotFound(err) && strings.Contains(err.Error(), "No such image") {
+			return fmt.Errorf("%w: %q: guino does not pull images, so load it first "+
+				"(docker load / docker pull) and retry: %w",
+				runtime.ErrImageNotFound, cfg.Image, err)
+		}
 		return fmt.Errorf("creating container %s: %w", id, err)
 	}
 

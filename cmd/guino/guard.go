@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	goruntime "runtime"
 
 	"github.com/tmls-ai/guino/internal/config"
@@ -24,10 +25,14 @@ type startupSteps struct {
 	guard     func(context.Context) error
 	reconcile func(context.Context) error
 	ensureNet func(context.Context) error
+	// egress runs last: the rules name the managed network's bridge interface,
+	// which does not exist until ensureNet has run. Optional — nil means the
+	// entrypoint installs no egress profile.
+	egress func(context.Context) error
 }
 
 // runStartup executes the startup steps in the one order that is safe: Ping →
-// guards → Reconcile → EnsureNetwork. A guard refusal MUST short-circuit
+// guards → Reconcile → EnsureNetwork → egress. A guard refusal MUST short-circuit
 // before Reconcile/EnsureNetwork so a refused posture never mutates the
 // managed network. Error wrapping is identical to the previous inline code in
 // both entrypoints.
@@ -43,6 +48,11 @@ func runStartup(ctx context.Context, s startupSteps) error {
 	}
 	if err := s.ensureNet(ctx); err != nil {
 		return fmt.Errorf("ensuring Guino network: %w", err)
+	}
+	if s.egress != nil {
+		if err := s.egress(ctx); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -91,6 +101,43 @@ func applyNetworkGuards(ctx context.Context, rt *docker.DockerRuntime, cfg *conf
 	return applyNetworkGuardsWithProbe(ctx, rt, cfg, logger, httpListener, realPlatformProbe)
 }
 
+// hostBindRoots converts the configured roots to the policy type.
+func hostBindRoots(cfg *config.Config) []netpolicy.HostBindRoot {
+	roots := make([]netpolicy.HostBindRoot, len(cfg.Sandbox.HostBindRoots))
+	for i, r := range cfg.Sandbox.HostBindRoots {
+		roots[i] = netpolicy.HostBindRoot(r)
+	}
+	return roots
+}
+
+// hostBindGuard refuses to start when host binds are enabled in a posture where
+// anything reaching the control plane could ask for a directory of the host
+// filesystem. It runs alongside the network guards for the same reason they
+// exist: a refusal has to happen before anything is created, not at first use.
+func hostBindGuard(cfg *config.Config, logger *slog.Logger, httpListener bool) error {
+	if !cfg.Sandbox.AllowHostBinds {
+		return nil
+	}
+	if httpListener && !netpolicy.HostBindsAllowed(cfg.Auth.Enabled, cfg.Server.Host) {
+		logger.Error(netpolicy.MsgHostBindsUnsafe,
+			"auth_enabled", cfg.Auth.Enabled, "server_host", cfg.Server.Host)
+		return errors.New(netpolicy.MsgHostBindsUnsafe)
+	}
+	// A catastrophic root is a refusal to start, not a surprise at first bind.
+	if err := netpolicy.ValidateHostBindRoots(hostBindRoots(cfg), filepath.EvalSymlinks); err != nil {
+		logger.Error("host bind roots are not usable", "error", err)
+		return err
+	}
+	if len(cfg.Sandbox.HostBindRoots) == 0 {
+		logger.Warn("allow_host_binds is true but no host_bind_roots are configured; every bind request will be refused")
+	} else {
+		for _, root := range cfg.Sandbox.HostBindRoots {
+			logger.Info("host bind root", "path", root.Path, "read_only", root.ReadOnly)
+		}
+	}
+	return nil
+}
+
 // applyNetworkGuardsWithProbe is applyNetworkGuards with the platform probe
 // injected, so guard_test.go can prove the positive platform_override branch
 // (override attested ⇒ Guino STARTS + committed ERROR attestation logged) and
@@ -106,6 +153,9 @@ func applyNetworkGuards(ctx context.Context, rt *docker.DockerRuntime, cfg *conf
 // On refusal it writes the committed netpolicy message to stderr and returns a
 // non-nil error so the caller exits non-zero.
 func applyNetworkGuardsWithProbe(ctx context.Context, rt *docker.DockerRuntime, cfg *config.Config, logger *slog.Logger, httpListener bool, probe platformProbe) error {
+	if err := hostBindGuard(cfg, logger, httpListener); err != nil {
+		return err
+	}
 	effectiveMode := netpolicy.Policy{
 		DefaultMode: runtime.NetworkMode(cfg.Runtime.DefaultNetworkMode),
 	}.EffectiveDefault()

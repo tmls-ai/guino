@@ -28,15 +28,28 @@ func (b *DarwinMemoryBackend) HostMemory() (total, used, free uint64, err error)
 		return 0, 0, 0, fmt.Errorf("sysctl hw.memsize: %w", err)
 	}
 
-	// Get page size and free/inactive pages via vm_stat
-	pageSize, freePages, inactivePages, err := parseVMStat()
+	// Get page size and reclaimable pages via vm_stat
+	pageSize, freePages, inactivePages, purgeablePages, fileBackedPages, err := parseVMStat()
 	if err != nil {
 		// Fallback: estimate 70% used
 		usedEstimate := totalMem * 70 / 100
 		return totalMem, usedEstimate, totalMem - usedEstimate, nil
 	}
 
-	available := (freePages + inactivePages) * pageSize
+	// Purgeable and file-backed pages are reclaimable on demand — macOS drops
+	// them the moment anything needs the space. Counting only free+inactive said
+	// 69% used on a Mac whose own `memory_pressure` reported 60% free, and Guino
+	// then refused to create sandboxes: the agent accepted a message and never
+	// answered, with "host under critical memory pressure" visible only in a log.
+	//
+	// File-backed pages overlap inactive ones, so the larger of the two is used
+	// rather than the sum, which would double-count and swing too far the other
+	// way.
+	reclaimable := inactivePages
+	if fileBackedPages > reclaimable {
+		reclaimable = fileBackedPages
+	}
+	available := (freePages + reclaimable + purgeablePages) * pageSize
 	if available > totalMem {
 		available = totalMem
 	}
@@ -44,12 +57,12 @@ func (b *DarwinMemoryBackend) HostMemory() (total, used, free uint64, err error)
 	return totalMem, usedMem, available, nil
 }
 
-func parseVMStat() (pageSize, freePages, inactivePages uint64, err error) {
+func parseVMStat() (pageSize, freePages, inactivePages, purgeablePages, fileBackedPages uint64, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "/usr/bin/vm_stat").Output()
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, 0, err
 	}
 
 	// Use system page size as default.
@@ -74,8 +87,14 @@ func parseVMStat() (pageSize, freePages, inactivePages uint64, err error) {
 		if strings.HasPrefix(line, "Pages inactive:") {
 			inactivePages = parseVMStatValue(line)
 		}
+		if strings.HasPrefix(line, "Pages purgeable:") {
+			purgeablePages = parseVMStatValue(line)
+		}
+		if strings.HasPrefix(line, "File-backed pages:") {
+			fileBackedPages = parseVMStatValue(line)
+		}
 	}
-	return pageSize, freePages, inactivePages, nil
+	return pageSize, freePages, inactivePages, purgeablePages, fileBackedPages, nil
 }
 
 func parseVMStatValue(line string) uint64 {

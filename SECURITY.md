@@ -26,7 +26,10 @@ The runtime applies the following controls:
 - **CPU/memory**: Hard limits default to `0` (unlimited); configure explicit limits. Pressure monitoring is not an OOM guarantee
 - **No new privileges**: `no-new-privileges` security option
 - **Network posture**: `network_mode` ∈ `internal` (default) / `bridge` / `none`. **`none` disables external networking (container loopback remains)**; `internal` still reaches the bridge gateway, embedded DNS and host `0.0.0.0` services (see Known Limitations)
-- **Port binding**: published only in `bridge` mode, bound to `127.0.0.1`; fixed at creation (no runtime add/remove — `501`)
+- **Port binding**: published only in `bridge` mode, bound to `127.0.0.1`; fixed at creation (no runtime add/remove, `501`)
+- **Sandbox proxy**: `/api/v1/sandboxes/{id}/proxy/{port}/...` forwards HTTP and WebSocket traffic to the sandbox's own IP only (the caller chooses the port, never the host), behind the same API key as every other route; `X-API-Key` and `Authorization` are stripped before forwarding, environment proxy settings are ignored, and browser WebSocket upgrades must come from `server.allowed_origins`. Proxied responses are sandbox-controlled content served on the API origin, so front them with a separate origin before showing them in a browser
+- **Egress profile** (opt-in): `runtime.egress_profile: desktop` installs iptables rules on the managed bridge that drop private, CGNAT, link-local (including `169.254.169.254`), loopback, multicast and reserved IPv4 ranges and Guino's own `server.port`; startup refuses if they cannot be installed. See §(8)
+- **Host binds** (opt-in): `sandbox.allow_host_binds` mounts only directories inside `sandbox.host_bind_roots`, compared after symlink resolution; system paths, anything inside them and their ancestors are refused, and `serve` refuses to start with host binds unless auth is enabled on a loopback listener
 - **Path validation**: Null byte and traversal protection on all file operations
 - **Constant-time auth**: API key comparison resistant to timing attacks
 - **SSRF protection**: S3 endpoints blocked from internal/private ranges by default; one operator-configured endpoint may be opted in (pinned, never metadata) — see §(4)
@@ -155,9 +158,31 @@ is recorded here so it is not silently reversed.
 
 ### (8) Out of scope for v1
 
-Guino does not program host iptables/nftables and does not run as an egress-filtering
-root. Per-`internal` egress filtering is a tracked follow-up, not in v1. Do not assume
-`internal` will gain egress filtering without an explicit release note.
+By default (`runtime.egress_profile: open`) Guino does not program iptables/nftables
+and does not run as an egress-filtering root. The opt-in `desktop` profile is meant
+for a dedicated sandbox VM where Guino is root next to the Docker daemon: it installs
+`GUINO-EGRESS` (from `DOCKER-USER`) and `GUINO-EGRESS-HOST` (from `INPUT`) chains
+scoped to the managed bridge interface. They drop `10/8`, `172.16/12`, `192.168/16`,
+`100.64/10`, `169.254/16`, `127/8`, `0/8`, `224/4` and `240/4`, allow DNS only to the
+VM's default gateway, and drop sandbox traffic to `server.port` on any local address.
+Both chains are replaced in one `iptables-restore --noflush` commit and existing
+jumps are left in place, so a restart never leaves running sandboxes unfiltered, and only reply-direction conntrack state skips the denylist. It is IPv4
+only (the managed network has IPv6 disabled) and does not filter other services
+listening on the VM itself. Switching back to `open` leaves the chains in place. Per-`internal` egress filtering remains a
+tracked follow-up. Do not assume `internal` will gain egress filtering without an
+explicit release note.
+
+Host bind containment is checked when the sandbox is created. The contents of an
+allowed root can change afterwards (including new symlinks inside a writable bind),
+so do not give a writable bind to a sandbox whose root overlaps another sandbox's
+or holds anything you would not hand to the code running in it.
+
+With authentication disabled the API is for a trusted local machine only: it has
+no CSRF or `Host` check, so a web page in a local browser can send state-changing
+requests to it (and, through DNS rebinding, read responses). Enable `auth.enabled`
+whenever a browser on the same machine visits untrusted sites. The sandbox proxy
+checks `Origin` on WebSocket upgrades. Proxy requests that fail authentication are
+rate limited at the control-plane rate.
 
 ### (9) The feature token is a capability hint, not auth
 
@@ -199,4 +224,4 @@ platform fact consulted anywhere else, and it relaxes no other control.
 - Authentication is disabled by default for local development convenience
 - **`internal` is NOT a network boundary**: a sandbox still reaches the bridge gateway, the embedded DNS resolver (`127.0.0.11`) and any host service bound to `0.0.0.0`. `network_mode=none` disables external networking (container loopback remains); shared-kernel risks remain. Egress filtering for `internal` is a tracked follow-up, not in v1
 - **Docker-out-of-Docker (DooD) port access is unsupported**: when guino's Docker client targets a remote or socket-proxied daemon (`tcp://`, `ssh://`, `socat`/`ssh -L`/docker-context/bind-mounted sibling socket), `127.0.0.1` port bindings land on the *daemon* host, not the guino host. The same proxied-socket topology also **voids** the `platform_override` co-residency attestation and re-exposes the unauthenticated control plane
-- Dynamic port forwarding is not supported: `POST`/`DELETE /api/v1/sandboxes/{id}/ports` permanently return `501`; port mappings are fixed at sandbox creation
+- Dynamic port publishing is not supported: `POST`/`DELETE /api/v1/sandboxes/{id}/ports` permanently return `501`; port mappings are fixed at sandbox creation. The authenticated sandbox proxy reaches any port without publishing it, but only when Guino runs next to the Docker bridge

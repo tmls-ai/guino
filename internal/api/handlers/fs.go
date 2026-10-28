@@ -12,6 +12,7 @@ import (
 
 	"github.com/tmls-ai/guino/internal/engine"
 	"github.com/tmls-ai/guino/internal/pathutil"
+	"github.com/tmls-ai/guino/internal/runtime"
 )
 
 // FileHandler handles file operations.
@@ -57,6 +58,10 @@ func (h *FileHandler) ReadFile(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, engine.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "sandbox not found")
+			return
+		}
+		if errors.Is(err, runtime.ErrFileNotFound) {
+			writeError(w, http.StatusNotFound, "file not found: "+path)
 			return
 		}
 		h.logger.Error("failed to read file", "sandbox", id, "path", path, "error", err)
@@ -279,6 +284,11 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, engine.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "sandbox not found")
+			return
+		}
+		// A path that is not there is the caller's mistake, not Guino's fault.
+		if errors.Is(err, runtime.ErrFileNotFound) {
+			writeError(w, http.StatusNotFound, "file not found: "+path)
 			return
 		}
 		h.logger.Error("internal error", "error", err)

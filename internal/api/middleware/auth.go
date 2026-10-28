@@ -20,6 +20,7 @@ func Auth(validKeys []string) func(http.Handler) http.Handler {
 			key := r.Header.Get("X-API-Key")
 
 			if key == "" {
+				markAuthFailed(r)
 				http.Error(w, `{"error":"missing API key"}`, http.StatusUnauthorized)
 				return
 			}
@@ -35,6 +36,7 @@ func Auth(validKeys []string) func(http.Handler) http.Handler {
 			}
 
 			if !valid {
+				markAuthFailed(r)
 				http.Error(w, `{"error":"invalid API key"}`, http.StatusUnauthorized)
 				return
 			}

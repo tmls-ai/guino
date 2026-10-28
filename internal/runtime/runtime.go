@@ -2,9 +2,24 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 )
+
+// ErrImageNotFound reports that a sandbox image is absent from the machine.
+//
+// Guino never pulls, which is what a desktop install wants: an offline machine
+// fails immediately instead of hanging on a registry it cannot reach. That makes
+// the condition ordinary and user-fixable rather than a server fault, so it is a
+// typed error the API can turn into a 4xx with instructions.
+var ErrImageNotFound = errors.New("sandbox image not present on this machine")
+
+// ErrFileNotFound is a path that does not exist inside a sandbox, as distinct from
+// a sandbox that does not exist. Without it the API answered a missing file with a
+// 500, which reads as "Guino is broken" rather than "you asked for the wrong
+// path", and it cost real debugging time on a run that had in fact succeeded.
+var ErrFileNotFound = errors.New("file not found")
 
 // SandboxStatus represents the current state of a sandbox.
 type SandboxStatus string
@@ -46,6 +61,15 @@ type PortMapping struct {
 // VolumeMount defines a named volume to mount into a sandbox.
 type VolumeMount struct {
 	Name      string `json:"name"`
+	MountPath string `json:"mount_path"`
+	ReadOnly  bool   `json:"read_only,omitempty"`
+}
+
+// HostBind is a host directory mounted into a sandbox. Already validated against
+// the operator's allowed roots (netpolicy.ValidateHostBind) — the runtime mounts
+// what it is given, so nothing unvalidated may reach this type.
+type HostBind struct {
+	HostPath  string `json:"host_path"`
 	MountPath string `json:"mount_path"`
 	ReadOnly  bool   `json:"read_only,omitempty"`
 }
@@ -109,9 +133,14 @@ type SandboxConfig struct {
 	// WritableRootfs opts out of the read-only rootfs default (secure default
 	// is false → read-only). For heavyweight images that write outside the
 	// tmpfs/volume mounts.
-	WritableRootfs bool              `json:"writable_rootfs,omitempty"`
-	Storage        *StorageConfig    `json:"storage,omitempty"`
-	TmpfsMap       map[string]string `json:"-"` // Computed by engine from storage config + defaults
+	WritableRootfs bool           `json:"writable_rootfs,omitempty"`
+	Storage        *StorageConfig `json:"storage,omitempty"`
+	// HostBinds carries the caller's *request* on the way in and the validated,
+	// symlink-resolved binds on the way out — the engine replaces the slice
+	// before the Docker boundary, exactly as it does for NetworkMode. The runtime
+	// mounts what it is handed, so an unvalidated value must never reach it.
+	HostBinds []HostBind        `json:"host_binds,omitempty"`
+	TmpfsMap  map[string]string `json:"-"` // Computed by engine from storage config + defaults
 }
 
 // SandboxInfo holds runtime information about a sandbox.

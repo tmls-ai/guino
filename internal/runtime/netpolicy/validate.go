@@ -34,6 +34,12 @@ func (e *ValidationError) Error() string {
 type Policy struct {
 	// DefaultMode is runtime.default_network_mode. "" ⇒ internal.
 	DefaultMode runtime.NetworkMode
+	// HostBindsEnabled is runtime.allow_host_binds. False ⇒ every bind request
+	// is refused regardless of the roots below.
+	HostBindsEnabled bool
+	// HostBindRoots are the directories the operator allows sandboxes to bind
+	// from. A per-sandbox request may only narrow one of these.
+	HostBindRoots []HostBindRoot
 }
 
 // EffectiveDefault returns the concrete global default ("" normalized to
