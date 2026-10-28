@@ -64,11 +64,12 @@ POST /api/v1/sandboxes
 | `image` | string | `guino/default:latest` | Docker image |
 | `env` | object | `{}` | Environment variables |
 | `workdir` | string | `""` | Working directory |
-| `timeout` | int | `1800` | Auto-expiry in seconds (30 min) |
+| `timeout` | int | `1800` | Idle expiry in seconds (30 min), refreshed by activity |
 | `cpu` | int | `0` | CPU in NanoCPUs (1e9 = 1 core) |
 | `memory` | int | `0` | Memory in bytes; default 0 means unlimited |
 | `ports` | array | `[]` | Port mappings (`host_port: 0` for auto-assign) |
 | `storage` | object | `null` | Storage configuration (see below) |
+| `host_binds` | array | `[]` | `[{"host_path", "mount_path", "read_only"}]`, only inside `sandbox.host_bind_roots` (else `422`) |
 
 **Storage fields:**
 
@@ -262,6 +263,30 @@ request) and published **Docker-natively to `127.0.0.1` only, in `network_mode=b
 only** — inert in `internal` (the default), rejected in `none`. There is no userspace
 forwarder and no runtime add/remove: `POST`/`DELETE /ports` permanently return `501`.
 `GET /ports` returns the list configured at creation (empty unless ports were set).
+To reach any port without publishing it, use the proxy.
+
+## Sandbox Proxy
+
+```
+ANY /api/v1/sandboxes/{id}/proxy/{port}/{path...}   → HTTP or WebSocket to the sandbox
+```
+
+Authenticated like every other route; `X-API-Key` and `Authorization` are stripped
+before forwarding. `400` bad port or no address, `404` unknown sandbox, `502` nothing
+listening. Needs Guino co-resident with the Docker bridge. See the
+[API reference](../api-reference.md#sandbox-proxy) for details.
+
+## Sessions
+
+```
+POST   /api/v1/sandboxes/{id}/sessions               {"name": "web"}     → 201
+GET    /api/v1/sandboxes/{id}/sessions                                   → 200
+POST   /api/v1/sandboxes/{id}/sessions/{name}/exec   {"command": "..."}  → 202
+GET    /api/v1/sandboxes/{id}/sessions/{name}/logs?lines=500             → 200
+DELETE /api/v1/sandboxes/{id}/sessions/{name}                            → 204
+```
+
+tmux-backed shells that outlive a request. `501` if the image has no tmux.
 
 ## Statistics
 
@@ -358,6 +383,7 @@ Response:
 | `408` | Exec timeout |
 | `409` | Sandbox not running |
 | `413` | Payload too large (1MB JSON, 100MB upload) |
+| `422` | Host bind refused, or sandbox image not present |
 | `429` | Rate limit exceeded |
 | `500` | Internal error |
 | `503` | Sandbox limit reached or memory pressure too high (Critical/Emergency) |
@@ -365,3 +391,5 @@ Response:
 ## Rate Limiting
 
 Per-key token bucket (or per-IP when auth is disabled). Default: 10 req/s with burst of 20.
+Proxy traffic has a separate bucket, default 200 req/s with burst of 400
+(`server.rate_limit_proxy_rps` / `rate_limit_proxy_burst`).

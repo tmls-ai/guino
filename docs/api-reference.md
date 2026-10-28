@@ -77,11 +77,12 @@ Request body:
 | `image` | string | `guino/default:latest` | Docker image to use |
 | `env` | object | `{}` | Environment variables |
 | `workdir` | string | `""` | Working directory |
-| `timeout` | int | `1800` | Auto-expiry in seconds (default 30 min) |
+| `timeout` | int | `1800` | Idle expiry in seconds (default 30 min). Exec, file, session and proxy activity pushes `expires_at` out again, and an open exec stream or proxied connection keeps the sandbox alive. This is not a hard lifetime cap: a sandbox in continuous use does not expire |
 | `cpu` | int | `0` | CPU limit in NanoCPUs (1 core = 1e9) |
 | `memory` | int | `0` | Memory limit in bytes; default 0 means unlimited |
 | `ports` | array | `[]` | Port mappings (set `host_port: 0` for auto-assign) |
 | `storage` | object | `null` | Storage configuration (see below) |
+| `host_binds` | array | `[]` | Host directories to mount: `[{"host_path", "mount_path", "read_only"}]`. Refused with `422` unless the server sets `sandbox.allow_host_binds` and the resolved path is inside a configured `sandbox.host_bind_roots` entry |
 
 Response `201 Created`:
 ```json
@@ -615,8 +616,56 @@ DELETE /api/v1/sandboxes/{id}/ports/{port} → 501 Not Implemented
 Port mappings are **fixed at sandbox creation** via the `ports` field in the create
 request. They are published **Docker-natively to `127.0.0.1` only, and only in
 `network_mode=bridge`** — inert in `internal` (the default), rejected in `none`. There
-is no userspace forwarder and no runtime add/remove, so both mutation endpoints
-permanently return `501`.
+is no runtime add/remove, so both mutation endpoints permanently return `501`.
+To reach a port that was not published, use the sandbox proxy below.
+
+---
+
+## Sandbox Proxy
+
+```
+ANY /api/v1/sandboxes/{id}/proxy/{port}/{path...}
+```
+
+Forwards HTTP and WebSocket traffic to `{port}` on the sandbox's own address,
+through the authenticated control plane. Nothing is published on the host, so any
+port works at any time. The rest of the path and the query string are passed
+through; `X-API-Key` and `Authorization` are stripped before the request reaches
+the sandbox. Proxy traffic counts as sandbox activity for the idle timeout, and a
+sandbox does not expire while a proxied request or WebSocket is open. A browser
+WebSocket upgrade must come from one of `server.allowed_origins` (requests without
+an `Origin` header, such as SDKs and server-side clients, are not checked).
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Invalid port, or the sandbox has no address (not running) |
+| `403` | WebSocket upgrade from an origin that is not allowed |
+| `404` | Sandbox not found |
+| `502` | Nothing answered on that port |
+
+The proxy dials the sandbox IP from the Guino process, so it needs Guino to run
+next to the Docker bridge (native Linux, or inside the same VM as the daemon).
+Proxied responses are content served by the sandbox on the API's origin: front it
+with your own origin before showing it in a browser that also holds Guino state.
+
+---
+
+## Sessions
+
+Long-lived shells, backed by tmux inside the sandbox. `exec` is one-shot; a session
+keeps a server or a build running between calls. Names match
+`^[A-Za-z0-9_-]{1,64}$`. Images without tmux answer `501`.
+
+```
+POST   /api/v1/sandboxes/{id}/sessions               {"name": "web"}      → 201
+GET    /api/v1/sandboxes/{id}/sessions                                    → 200 ["web"]
+POST   /api/v1/sandboxes/{id}/sessions/{name}/exec   {"command": "..."}   → 202
+GET    /api/v1/sandboxes/{id}/sessions/{name}/logs?lines=500              → 200 {"name", "output"}
+DELETE /api/v1/sandboxes/{id}/sessions/{name}                             → 204
+```
+
+`exec` types the command into the session and returns at once; read its output
+back with `logs`. An unknown session is `404`, a duplicate name on create `409`.
 
 ---
 
@@ -680,8 +729,11 @@ All errors follow a consistent format:
 | `408` | Request timeout (exec exceeded timeout) |
 | `409` | Conflict (sandbox is not running) |
 | `413` | Payload too large (body > 1MB for JSON, > 100MB for uploads) |
+| `422` | Unprocessable (host bind refused, sandbox image not present) |
 | `429` | Too many requests (rate limit exceeded) |
 | `500` | Internal server error |
+| `501` | Not implemented (port mutation, sessions on an image without tmux) |
+| `502` | Bad gateway (nothing answered on a proxied port) |
 | `503` | Service unavailable (sandbox limit reached) |
 
 ## Rate Limiting
@@ -691,3 +743,8 @@ When rate limiting is enabled, the API enforces per-key limits. Requests exceedi
 Rate limit is tracked by API key (when auth is enabled) or by client IP (when auth is disabled).
 
 Default: 10 requests/second with burst of 20.
+
+Sandbox proxy traffic (`/sandboxes/{id}/proxy/...`) has its own bucket per client,
+`server.rate_limit_proxy_rps` / `server.rate_limit_proxy_burst` (default 200 / 400),
+because one preview page is dozens of asset requests. Set them to `0` to reuse the
+control-plane limits.

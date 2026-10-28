@@ -100,6 +100,18 @@ func (h *ExecHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = stream.Close() }()
 
+	// The client sends nothing after the request, so this read only returns when
+	// it disconnects. Closing the stream then ends Recv and releases the sandbox's
+	// hold, even for a command that never prints and has no timeout.
+	go func() {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				_ = stream.Close()
+				return
+			}
+		}
+	}()
+
 	for {
 		msg, err := stream.Recv()
 		if err == io.EOF {

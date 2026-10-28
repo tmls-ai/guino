@@ -19,7 +19,7 @@ var (
 // capability hint only — NOT an authentication or authorization signal. SDKs
 // use it lazily to fail fast against servers that predate a feature. Keep the
 // tokens stable; they are part of the public API surface.
-var ServerFeatures = []string{"network_mode", "start", "file_stat", "sandbox_ip", "writable_rootfs"}
+var ServerFeatures = []string{"network_mode", "start", "file_stat", "sandbox_ip", "writable_rootfs", "sessions", "port_proxy", "host_binds", "egress_profile"}
 
 // SetVersion sets the build version info.
 func SetVersion(v, c, b string) {

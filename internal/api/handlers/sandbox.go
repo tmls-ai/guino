@@ -41,6 +41,11 @@ type createSandboxRequest struct {
 	// including one equal to the global default — is a 400. A per-sandbox
 	// override may only INCREASE isolation.
 	NetworkMode runtime.NetworkMode `json:"network_mode,omitempty"`
+	// HostBinds requests host directories be mounted into the sandbox. Every
+	// entry is validated against the operator's allowed roots before anything is
+	// created, and a request may only narrow a root — never widen one, and never
+	// name a path outside them.
+	HostBinds []runtime.HostBind `json:"host_binds,omitempty"`
 }
 
 type sandboxResponse struct {
@@ -59,7 +64,7 @@ func toSandboxResponse(s *engine.Sandbox) sandboxResponse {
 		Image:     s.Image,
 		Status:    s.GetStatus(),
 		CreatedAt: s.CreatedAt,
-		ExpiresAt: s.ExpiresAt,
+		ExpiresAt: s.Expiry(),
 		Ports:     s.Ports,
 	}
 }
@@ -82,6 +87,7 @@ func (h *SandboxHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Storage:        req.Storage,
 		NetworkMode:    req.NetworkMode,
 		WritableRootfs: req.WritableRootfs,
+		HostBinds:      req.HostBinds,
 	}
 	if req.Timeout > 0 {
 		cfg.Timeout = time.Duration(req.Timeout) * time.Second
@@ -100,6 +106,19 @@ func (h *SandboxHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, engine.ErrPressureTooHigh) {
 			writeError(w, http.StatusServiceUnavailable, "host under critical memory pressure")
+			return
+		}
+		if errors.Is(err, engine.ErrHostBindRejected) {
+			h.logger.Warn("host bind refused", "error", err)
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		// A missing image is the caller's to fix (wrong name, or the image was
+		// never loaded), so it must reach them rather than sit in Guino's log as
+		// an opaque 500.
+		if errors.Is(err, runtime.ErrImageNotFound) {
+			h.logger.Warn("sandbox image not present", "error", err)
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
 		h.logger.Error("failed to create sandbox", "error", err)

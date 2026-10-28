@@ -14,9 +14,9 @@ Guino is for local development and self-hosted deployments with a trusted operat
 
 A process with access to the Docker socket controls the Docker host. Only trusted users should operate Guino or access its API. API keys are operator credentials, not per-tenant isolation or fine-grained authorization. Do not inject host secrets or mount sensitive host paths into sandboxes.
 
-`internal` still permits reaching the bridge gateway, embedded DNS and host services. `bridge` has unfiltered outbound access and requires an explicit opt-in. `none` disables external networking (container loopback remains); it does not remove kernel, filesystem or resource exhaustion risks.
+`internal` still permits reaching the bridge gateway, embedded DNS and host services. `bridge` has unfiltered outbound access and requires an explicit opt-in, unless the opt-in `desktop` egress profile is installed in a dedicated sandbox VM, which drops private, link-local, loopback and metadata ranges and Guino's own port. `none` disables external networking (container loopback remains); it does not remove kernel, filesystem or resource exhaustion risks.
 
-The API binds `0.0.0.0` and disables authentication by default, but startup guards refuse unsafe combinations. Use the loopback/`none` quickstart for a trusted local evaluation. Enable authentication and TLS before sharing an endpoint. Health, version and dashboard static content remain unauthenticated even with API authentication enabled.
+The API binds `0.0.0.0` and disables authentication by default, but startup guards refuse unsafe combinations. Use the loopback/`none` quickstart for a trusted local evaluation. Enable authentication and TLS before sharing an endpoint. Health, version and dashboard static content remain unauthenticated even with API authentication enabled. The sandbox proxy is authenticated like the rest of the API, but what it returns is sandbox-controlled content on the API origin. Host binds are off by default and limited to configured roots.
 
 ## Further details
 

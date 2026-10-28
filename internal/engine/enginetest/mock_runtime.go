@@ -16,6 +16,9 @@ type MockRuntime struct {
 	Stopped map[string]bool
 	Removed map[string]bool
 	ExecFn  func(ctx context.Context, id string, opts runtime.ExecOpts) (*runtime.ExecResult, error)
+	// IP is reported by Info for every sandbox.
+	IP           string
+	ExecStreamFn func(ctx context.Context, id string, opts runtime.ExecOpts) (runtime.ExecStream, error)
 }
 
 // NewMockRuntime creates a new MockRuntime.
@@ -59,7 +62,7 @@ func (m *MockRuntime) Remove(_ context.Context, id string) error {
 }
 
 func (m *MockRuntime) Info(_ context.Context, id string) (*runtime.SandboxInfo, error) {
-	return &runtime.SandboxInfo{ID: id, Status: runtime.StatusRunning}, nil
+	return &runtime.SandboxInfo{ID: id, Status: runtime.StatusRunning, IP: m.IP}, nil
 }
 
 func (m *MockRuntime) List(_ context.Context) ([]runtime.SandboxInfo, error) {
@@ -73,7 +76,10 @@ func (m *MockRuntime) Exec(ctx context.Context, id string, opts runtime.ExecOpts
 	return &runtime.ExecResult{ExitCode: 0, Stdout: "ok\n"}, nil
 }
 
-func (m *MockRuntime) ExecStream(_ context.Context, _ string, _ runtime.ExecOpts) (runtime.ExecStream, error) {
+func (m *MockRuntime) ExecStream(ctx context.Context, id string, opts runtime.ExecOpts) (runtime.ExecStream, error) {
+	if m.ExecStreamFn != nil {
+		return m.ExecStreamFn(ctx, id, opts)
+	}
 	return nil, nil
 }
 

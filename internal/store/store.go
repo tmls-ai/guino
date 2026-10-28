@@ -18,6 +18,11 @@ type SandboxRecord struct {
 	Labels    map[string]string `json:"labels,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 	ExpiresAt time.Time         `json:"expires_at,omitempty"`
+	// Timeout is the idle window, persisted because ExpiresAt is refreshed from
+	// it on every operation. Without it a Guino restart leaves sandboxes with a
+	// deadline they can no longer push back, so the next one silently reverts to
+	// destroying a sandbox someone is still using.
+	Timeout time.Duration `json:"timeout,omitempty"`
 }
 
 // SnapshotRecord represents a persisted snapshot entry.

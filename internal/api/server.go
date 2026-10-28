@@ -32,7 +32,8 @@ type Server struct {
 
 // NewServer creates a new API server.
 func NewServer(eng *engine.Engine, rt runtime.Runtime, cfg *config.Config, logger *slog.Logger) *Server {
-	rl := middleware.NewRateLimiter(cfg.Server.RateLimitRPS, cfg.Server.RateLimitBurst)
+	rl := middleware.NewRateLimiter(cfg.Server.RateLimitRPS, cfg.Server.RateLimitBurst,
+		cfg.Server.RateLimitProxyRPS, cfg.Server.RateLimitProxyBurst)
 
 	s := &Server{
 		engine:      eng,
@@ -98,6 +99,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // RegisterRoutes sets up all API routes.
 func RegisterRoutes(r chi.Router, eng *engine.Engine, rt runtime.Runtime, cfg *config.Config, logger *slog.Logger) {
 	sh := handlers.NewSandboxHandler(eng, logger)
+	sessH := handlers.NewSessionHandler(eng, logger)
+	proxyH := handlers.NewProxyHandler(eng, logger, cfg.Server.AllowedOrigins)
 	eh := handlers.NewExecHandler(eng, logger)
 	fh := handlers.NewFileHandler(eng, logger)
 	ph := handlers.NewPortHandler(eng, logger)
@@ -146,6 +149,19 @@ func RegisterRoutes(r chi.Router, eng *engine.Engine, rt runtime.Runtime, cfg *c
 		r.Get("/sandboxes/{id}/ports", ph.List)
 		r.Post("/sandboxes/{id}/ports", ph.Add)
 		r.Delete("/sandboxes/{id}/ports/{port}", ph.Remove)
+
+		// Sessions — long-lived shells. Exec is one-shot, so this is what an agent
+		// uses to start a server and check on it later.
+		r.Post("/sandboxes/{id}/sessions", sessH.Create)
+		r.Get("/sandboxes/{id}/sessions", sessH.List)
+		r.Post("/sandboxes/{id}/sessions/{name}/exec", sessH.Exec)
+		r.Get("/sandboxes/{id}/sessions/{name}/logs", sessH.Logs)
+		r.Delete("/sandboxes/{id}/sessions/{name}", sessH.Delete)
+
+		// Sandbox traffic proxy — HTTP and WebSocket, through the authenticated
+		// control plane rather than a published Docker port (see proxy.go).
+		r.HandleFunc("/sandboxes/{id}/proxy/{port}", proxyH.Proxy)
+		r.HandleFunc("/sandboxes/{id}/proxy/{port}/*", proxyH.Proxy)
 
 		// Snapshots
 		r.Post("/sandboxes/{id}/snapshots", snapH.Create)

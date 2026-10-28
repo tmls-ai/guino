@@ -3,6 +3,10 @@
 server:
   host: "0.0.0.0"
   port: 8080
+  # Sandbox proxy traffic (/sandboxes/{id}/proxy/...) is limited separately from
+  # control-plane calls. 0 reuses rate_limit_rps / rate_limit_burst.
+  rate_limit_proxy_rps: 200
+  rate_limit_proxy_burst: 400
   tls:
     enabled: false
     cert_file: ""
@@ -36,9 +40,16 @@ runtime:
   reconcile_network: false
 
   # allow_unsafe_bridge MUST be true to start with default_network_mode=bridge.
-  # There is NO egress filter in v1: every bridge sandbox gets NAT'd, unfiltered
-  # egress. Leave false unless you accept that.
+  # With egress_profile "open" (the default) every bridge sandbox gets NAT'd,
+  # unfiltered egress. Leave false unless you accept that.
   allow_unsafe_bridge: false
+
+  # egress_profile: "open" installs no rules. "desktop" is for a dedicated
+  # sandbox VM where guino runs as root next to the Docker daemon: it drops
+  # sandbox traffic to private, link-local (incl. 169.254.169.254), loopback,
+  # CGNAT and multicast ranges and to guino's own server.port, keeping DNS to the
+  # VM gateway. Guino refuses to start if the rules cannot be installed.
+  egress_profile: "open"
 
   # allow_unsafe_bind is the dangerous last-resort opt-in that DISABLES the
   # startup bind guard entirely. The bind guard refuses to start when the
@@ -72,7 +83,10 @@ sandbox:
   allow_shared_volumes: true
   allow_s3: true
   allow_s3_fuse: false          # Requires SYS_ADMIN capability
-  allow_host_binds: false       # Never enable in production
+  # Host binds need auth.enabled and a loopback server.host. A request may only
+  # mount paths inside these roots (after resolving symlinks), never wider.
+  allow_host_binds: false
+  host_bind_roots: []           # e.g. [{path: "/home/me/shared", read_only: true}]
   max_volumes_per_sandbox: 5
   default_tmpfs:
     - path: "/tmp"

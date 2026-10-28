@@ -147,6 +147,9 @@ func serveCmd() *cobra.Command {
 				guard:     func(c context.Context) error { return applyNetworkGuards(c, rt, cfg, logger, true) },
 				reconcile: func(c context.Context) error { return rt.Reconcile(c, st) },
 				ensureNet: rt.EnsureNetwork,
+				egress: func(c context.Context) error {
+					return applyEgressProfile(c, rt, cfg, logger, realIptables)
+				},
 			}); err != nil {
 				return err
 			}
@@ -161,7 +164,11 @@ func serveCmd() *cobra.Command {
 
 			// Setup engine
 			eng := engine.NewEngine(rt, st, cfg.Sandbox, cfg.S3, cfg.Resource,
-				netpolicy.Policy{DefaultMode: runtime.NetworkMode(cfg.Runtime.DefaultNetworkMode)},
+				netpolicy.Policy{
+					DefaultMode:      runtime.NetworkMode(cfg.Runtime.DefaultNetworkMode),
+					HostBindsEnabled: cfg.Sandbox.AllowHostBinds,
+					HostBindRoots:    hostBindRoots(cfg),
+				},
 				logger)
 
 			// Setup API server
