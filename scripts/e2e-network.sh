@@ -72,6 +72,9 @@ WORKDIRS=()
 cleanup() {
   [ -n "$GUINO_PID" ] && kill "$GUINO_PID" 2>/dev/null || true
   wait 2>/dev/null || true
+  # guino leaves sandboxes running on shutdown (a restart restores them), so
+  # remove the containers on our networks before the networks themselves.
+  for n in "${NETWORKS[@]:-}"; do [ -n "$n" ] && docker ps -aq --filter "network=$n" | xargs -r docker rm -f >/dev/null 2>&1 || true; done
   for n in "${NETWORKS[@]:-}"; do [ -n "$n" ] && docker network rm "$n" >/dev/null 2>&1 || true; done
   for d in "${WORKDIRS[@]:-}"; do [ -n "$d" ] && rm -rf "$d" || true; done
 }

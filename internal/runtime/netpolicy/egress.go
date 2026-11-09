@@ -2,7 +2,6 @@ package netpolicy
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -102,11 +101,9 @@ var blockedV4 = []string{
 // EgressRules returns the iptables invocations that install `profile` for
 // traffic leaving containers on `bridge`, in the order they must be run.
 //
-// resolver is the VM's own DNS server, exempted (DNS only) from the denylist it
-// would otherwise fall inside; empty adds no exemption. controlPort is Guino's
-// own listening port (server.port), the one thing on the gateway a sandbox must
-// never reach. It is taken from the running config rather than assumed, since a
-// mismatch would silently reopen the hole.
+// resolvers are the DNS servers sandboxes use (runtime.sandbox_dns, or else the
+// VM's default gateway), each exempted (DNS only) from the denylist it would
+// otherwise fall inside; none adds no exemption.
 //
 // The rules are the chains' complete contents ("-A <chain> ..."). They are
 // installed with EgressRestore and EgressHooks, never one by one: a chain that
@@ -116,7 +113,7 @@ var blockedV4 = []string{
 // Returns nil for EgressOpen: "open" touches nothing. Switching a machine from
 // "desktop" back to "open" therefore leaves the chains in place (fail closed);
 // remove them by hand or reboot the VM.
-func EgressRules(profile EgressProfile, bridge, resolver string, controlPort int) ([][]string, error) {
+func EgressRules(profile EgressProfile, bridge string, resolvers []string) ([][]string, error) {
 	if profile == EgressOpen {
 		return nil, nil
 	}
@@ -126,10 +123,6 @@ func EgressRules(profile EgressProfile, bridge, resolver string, controlPort int
 	if bridge == "" {
 		return nil, fmt.Errorf("egress profile %q needs the bridge interface name", profile)
 	}
-	if controlPort < 1 || controlPort > 65535 {
-		return nil, fmt.Errorf("egress profile %q needs the control port, got %d", profile, controlPort)
-	}
-	port := strconv.Itoa(controlPort)
 
 	forward := func(chain string) [][]string {
 		rules := [][]string{
@@ -150,7 +143,7 @@ func EgressRules(profile EgressProfile, bridge, resolver string, controlPort int
 		// unreachable" still holds: a router at 192.168.1.1 is not this VM's
 		// gateway, and even the gateway is reachable for nothing but name
 		// resolution.
-		if resolver != "" {
+		for _, resolver := range resolvers {
 			for _, proto := range []string{"udp", "tcp"} {
 				rules = append(rules, []string{
 					"-A", chain, "-i", bridge, "-d", resolver,
@@ -168,20 +161,20 @@ func EgressRules(profile EgressProfile, bridge, resolver string, controlPort int
 	// Traffic to the host itself takes the INPUT path, which DOCKER-USER never
 	// sees.
 	//
-	// Port-scoped, not address-scoped. Dropping everything from the bridge also
-	// drops the gateway, and the gateway is the sandbox's first hop for the
-	// internet, so a blanket rule takes away the network it was supposed to leave
-	// alone. Measured: with the blanket rule a sandbox's default route
-	// (172.18.0.1) became unreachable and it had no internet at all, while the
-	// VM itself did. What must stay unreachable is Guino's control plane on any
-	// local address, not the address.
+	// Every new connection from the bridge to the host is dropped, not only
+	// Guino's port: a sandbox host also runs SSH, the Docker daemon's own
+	// listeners and whatever else the machine needs, and none of it is the
+	// sandbox's business. Forwarded traffic (the internet, the resolver) goes
+	// through FORWARD and never reaches this chain, so the gateway still routes.
+	// Measured on a gVisor host (2026-11-06): with this rule and the reply
+	// exemption, DNS, internet and the host-to-sandbox proxy all worked while
+	// the host's SSH and the gateway were unreachable.
 	host := func(chain string) [][]string {
 		return [][]string{
 			// Replies to connections the host opened toward a sandbox (the
 			// control plane proxying a preview, for one) must survive.
 			{"-A", chain, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "--ctdir", "REPLY", "-j", "RETURN"},
-			{"-A", chain, "-i", bridge, "-p", "tcp", "--dport", port, "-j", "DROP"},
-			{"-A", chain, "-i", bridge, "-p", "udp", "--dport", port, "-j", "DROP"},
+			{"-A", chain, "-i", bridge, "-j", "DROP"},
 			{"-A", chain, "-j", "RETURN"},
 		}
 	}

@@ -127,6 +127,10 @@ func RegisterRoutes(r chi.Router, eng *engine.Engine, rt runtime.Runtime, cfg *c
 		r.Delete("/sandboxes/{id}", sh.Delete)
 		r.Post("/sandboxes/{id}/stop", sh.Stop)
 		r.Post("/sandboxes/{id}/start", sh.Start)
+		// Host control for an autoscaler: refused without auth.
+		r.Post("/sandboxes/{id}/lease", handlers.RequireAuth(cfg.Auth.Enabled, sh.Lease))
+		r.Post("/sandboxes/{id}/archive", handlers.RequireAuth(cfg.Auth.Enabled, sh.Archive))
+		r.Post("/drain", handlers.RequireAuth(cfg.Auth.Enabled, sh.Drain))
 
 		// Exec
 		r.Post("/sandboxes/{id}/exec", eh.Exec)

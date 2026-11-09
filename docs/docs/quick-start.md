@@ -47,7 +47,7 @@ curl -fsS "http://127.0.0.1:8080/api/v1/sandboxes/$sandbox_id/files?path=/tmp/he
 ./bin/guino rm "$sandbox_id"
 ```
 
-The running engine also expires sandboxes after their configured lifetime. Graceful API server shutdown destroys its running sandboxes. See [Core Concepts](concepts.md) for snapshot and volume lifecycle details.
+The running engine also expires sandboxes after their configured lifetime. Graceful API server shutdown destroys its running sandboxes, except those with a `state` target, which the next start restores. See [Core Concepts](concepts.md) for snapshot and volume lifecycle details.
 
 ## 5. Connect an agent
 

@@ -47,8 +47,8 @@ runtime:
   # egress_profile: "open" installs no rules. "desktop" is for a dedicated
   # sandbox VM where guino runs as root next to the Docker daemon: it drops
   # sandbox traffic to private, link-local (incl. 169.254.169.254), loopback,
-  # CGNAT and multicast ranges and to guino's own server.port, keeping DNS to the
-  # VM gateway. Guino refuses to start if the rules cannot be installed.
+  # CGNAT and multicast ranges and every new connection to the host itself,
+  # keeping DNS to the VM gateway. Guino refuses to start if the rules cannot be installed.
   egress_profile: "open"
 
   # allow_unsafe_bind is the dangerous last-resort opt-in that DISABLES the
@@ -70,6 +70,22 @@ runtime:
   # unauthenticated control plane is exposed. Risk-equivalent to bypassing the
   # platform classifier.
   platform_override: ""
+
+  # oci_runtime: the Docker runtime sandboxes run under, for example "runsc"
+  # (gVisor). Empty uses the daemon default (runc). A runsc used with sandbox
+  # state archives must run with --overlay2=none (daemon.json runtimeArgs):
+  # with gVisor's default overlay, Docker's copy-from-container reads the
+  # image's files, not what the sandbox wrote, and the archive comes out empty.
+  oci_runtime: ""
+
+  # sandbox_dns: DNS servers (IPv4) every sandbox resolves through, written to
+  # a file next to the store and mounted read-only over /etc/resolv.conf.
+  # Needed under runsc: on a user-defined network Docker points resolv.conf at
+  # its embedded resolver (127.0.0.11), which gVisor cannot reach, and
+  # Docker's own --dns does not change that. With egress_profile "desktop"
+  # exactly these get the port 53 exemption instead of the default gateway (on
+  # AWS use the VPC resolver, base +2). Empty keeps Docker's default.
+  sandbox_dns: []
 
 sandbox:
   default_image: "guino/default:latest"
@@ -124,3 +140,20 @@ s3:
   # and unspecified addresses are NEVER reachable regardless of this flag.
   # Env: GUINO_S3__ALLOW_INTERNAL_ENDPOINT=true
   allow_internal_endpoint: false
+  # Sandbox state archives (POST /sandboxes with "state") use this endpoint
+  # and these keys; with access_key empty they use the AWS SDK's default
+  # credential chain, which on a cloud host is the instance role.
+
+  # sandbox.state.* (under sandbox:) names where state archives may go:
+  #   state:
+  #     bucket: "machines"          # required for any state request
+  #     key_prefix: "projects/"     # every restore_key and archive_key starts with it
+  #     max_bytes: 2147483648       # cap on one archive (file sizes) and on a restore
+  # Archives are written to state-tmp/ next to the store while they upload.
+  # A state host or one with oci_runtime set must use egress_profile "desktop".
+
+resource:
+  # enable_auto_throttle lowers every running sandbox's memory limit under
+  # host memory pressure. Autoscaled sandbox hosts run with it off and rely on
+  # swap and admission (create answers 503 under critical pressure) instead.
+  enable_auto_throttle: true

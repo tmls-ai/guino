@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
+	"github.com/tmls-ai/guino/internal/engine"
 	"github.com/tmls-ai/guino/internal/runtime"
 )
 
@@ -19,7 +21,7 @@ var (
 // capability hint only — NOT an authentication or authorization signal. SDKs
 // use it lazily to fail fast against servers that predate a feature. Keep the
 // tokens stable; they are part of the public API surface.
-var ServerFeatures = []string{"network_mode", "start", "file_stat", "sandbox_ip", "writable_rootfs", "sessions", "port_proxy", "host_binds", "egress_profile"}
+var ServerFeatures = []string{"network_mode", "start", "file_stat", "sandbox_ip", "writable_rootfs", "sessions", "port_proxy", "host_binds", "egress_profile", "lease", "archive", "drain", "labels"}
 
 // SetVersion sets the build version info.
 func SetVersion(v, c, b string) {
@@ -73,4 +75,33 @@ func Version(w http.ResponseWriter, _ *http.Request) {
 		"build_date": buildDate,
 		"features":   ServerFeatures,
 	})
+}
+
+// writeAdmissionError answers a refused admission: 409 draining, 429 at the
+// sandbox limit, 503 under memory pressure. A caller treats all three as
+// "pick another host". Reports whether it wrote a response.
+func writeAdmissionError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, engine.ErrDraining):
+		writeError(w, http.StatusConflict, "draining")
+	case errors.Is(err, engine.ErrLimitReached):
+		writeError(w, http.StatusTooManyRequests, "maximum sandbox limit reached")
+	case errors.Is(err, engine.ErrPressureTooHigh):
+		writeError(w, http.StatusServiceUnavailable, "host under critical memory pressure")
+	default:
+		return false
+	}
+	return true
+}
+
+// RequireAuth refuses a host-control route (lease, archive, drain) on a server
+// without authentication, as host binds are refused: anything that reaches
+// the port could otherwise empty or pin a host.
+func RequireAuth(enabled bool, h http.HandlerFunc) http.HandlerFunc {
+	if enabled {
+		return h
+	}
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusForbidden, "this route requires auth.enabled")
+	}
 }

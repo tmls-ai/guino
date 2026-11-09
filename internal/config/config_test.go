@@ -157,3 +157,45 @@ func TestWarnings(t *testing.T) {
 	c.Runtime.DefaultNetworkMode = "none"
 	assert.Empty(t, c.Warnings())
 }
+
+func TestSandboxDNSMustBeIPv4(t *testing.T) {
+	for _, dns := range [][]string{{"1.1.1.1", "172.31.0.2"}, nil} {
+		cfg := DefaultConfig()
+		cfg.Runtime.SandboxDNS = dns
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("%v: %v", dns, err)
+		}
+	}
+	for _, dns := range [][]string{{"dns.google"}, {"2606:4700::1111"}, {""}} {
+		cfg := DefaultConfig()
+		cfg.Runtime.SandboxDNS = dns
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("%v: expected an error", dns)
+		}
+	}
+}
+
+// A state host or a gVisor host must run the desktop egress profile.
+func TestStateAndOCIRuntimeRequireTheEgressProfile(t *testing.T) {
+	for name, set := range map[string]func(*Config){
+		"state bucket": func(c *Config) { c.Sandbox.State.Bucket = "machines" },
+		"oci runtime":  func(c *Config) { c.Runtime.OCIRuntime = "runsc" },
+	} {
+		cfg := DefaultConfig()
+		set(cfg)
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("%s without egress_profile desktop must be refused", name)
+		}
+		cfg.Runtime.EgressProfile = "desktop"
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("%s with desktop: %v", name, err)
+		}
+	}
+	for _, prefix := range []string{"/p", "a/../b", `a\b`} {
+		cfg := DefaultConfig()
+		cfg.Sandbox.State.KeyPrefix = prefix
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("key_prefix %q must be refused", prefix)
+		}
+	}
+}

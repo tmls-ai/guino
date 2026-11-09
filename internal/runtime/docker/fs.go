@@ -4,9 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/docker/docker/api/types/container"
+
+	cerrdefs "github.com/containerd/errdefs"
 
 	"github.com/tmls-ai/guino/internal/runtime"
 )
@@ -187,4 +192,28 @@ func parseLsOutput(output string, basePath string) []runtime.FileInfo {
 		})
 	}
 	return files
+}
+
+// CopyFrom returns path as a tar stream through Docker's copy-from-container.
+// Unlike ReadFile it needs no running process, so it reads a stopped container.
+// Under gVisor this sees the sandbox's writes only when runsc runs with
+// --overlay2=none; the default in-memory overlay keeps them inside the sandbox.
+func (r *DockerRuntime) CopyFrom(ctx context.Context, id string, path string) (io.ReadCloser, error) {
+	rc, _, err := r.cli.CopyFromContainer(ctx, r.containerName(id), path)
+	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return nil, fmt.Errorf("%s in %s: %w", path, id, runtime.ErrFileNotFound)
+		}
+		return nil, fmt.Errorf("copying %s from %s: %w", path, id, err)
+	}
+	return rc, nil
+}
+
+// CopyTo extracts a tar stream into dir through Docker's copy-to-container. It
+// works on a created container that has not started yet.
+func (r *DockerRuntime) CopyTo(ctx context.Context, id string, dir string, content io.Reader) error {
+	if err := r.cli.CopyToContainer(ctx, r.containerName(id), dir, content, container.CopyToContainerOptions{}); err != nil {
+		return fmt.Errorf("copying into %s:%s: %w", id, dir, err)
+	}
+	return nil
 }

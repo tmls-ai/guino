@@ -84,7 +84,14 @@ func newIntegrationEngine(t *testing.T) *engine.Engine {
 	}
 
 	eng := engine.NewEngine(rt, st, cfg, getTestS3Config(), config.DefaultConfig().Resource, netpolicy.Policy{}, logger)
-	t.Cleanup(func() { eng.Shutdown(context.Background()) })
+	t.Cleanup(func() {
+		// Shutdown leaves containers running (a restart restores them), so a
+		// test removes its own.
+		for _, sb := range eng.ListSandboxes() {
+			_ = eng.DestroySandbox(context.Background(), sb.ID)
+		}
+		eng.Shutdown(context.Background())
+	})
 
 	return eng
 }

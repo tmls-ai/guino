@@ -98,16 +98,22 @@ func applyEgressProfile(
 		return errors.New(netpolicy.MsgEgressUnavailable)
 	}
 
-	// The VM's own DNS server, discovered from the default route rather than
-	// configured: it is assigned by the hypervisor and differs per platform and
-	// per boot. Empty is tolerated — the rules are then the plain denylist, and
-	// the sandbox has no name resolution, which is visible immediately.
-	resolver := defaultGateway(ctx)
-	if resolver != "" {
-		logger.Info("exempting the VM resolver from the egress denylist", "resolver", resolver)
+	// The configured sandbox DNS servers, or else the VM's own DNS server,
+	// discovered from the default route: it is assigned by the hypervisor and
+	// differs per platform and per boot. None is tolerated: the rules are then
+	// the plain denylist, and the sandbox has no name resolution, which is
+	// visible immediately.
+	resolvers := cfg.Runtime.SandboxDNS
+	if len(resolvers) == 0 {
+		if gw := defaultGateway(ctx); gw != "" {
+			resolvers = []string{gw}
+		}
+	}
+	if len(resolvers) > 0 {
+		logger.Info("exempting the sandbox resolvers from the egress denylist", "resolvers", strings.Join(resolvers, ","))
 	}
 
-	rules, err := netpolicy.EgressRules(profile, bridge, resolver, cfg.Server.Port)
+	rules, err := netpolicy.EgressRules(profile, bridge, resolvers)
 	if err != nil {
 		return fmt.Errorf("building egress rules: %w", err)
 	}

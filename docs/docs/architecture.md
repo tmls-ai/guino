@@ -185,6 +185,6 @@ Primary bottleneck is Docker API overhead. Exec-based file I/O adds ~20ms vs dir
 ## Persistence & Recovery
 
 1. **Normal** — Metadata saved to BoltDB on create, updated on status change
-2. **Graceful shutdown** — Destroys all running sandboxes, closes store
+2. **Graceful shutdown**: destroys running sandboxes without a `state` target, leaves those with one running (the next start restores them), closes store
 3. **Crash recovery** — Loads from BoltDB, validates against Docker, removes stale records
 4. **Snapshots** — Docker images with `den.snapshot` label, metadata in BoltDB

@@ -6,11 +6,9 @@ import (
 	"testing"
 )
 
-const testControlPort = 8080
-
 func rulesFor(t *testing.T, profile EgressProfile, bridge string) [][]string {
 	t.Helper()
-	rules, err := EgressRules(profile, bridge, "", testControlPort)
+	rules, err := EgressRules(profile, bridge, nil)
 	if err != nil {
 		t.Fatalf("EgressRules(%q, %q): %v", profile, bridge, err)
 	}
@@ -26,7 +24,7 @@ func joined(rules [][]string) []string {
 }
 
 func TestOpenProfileInstallsNothing(t *testing.T) {
-	rules, err := EgressRules(EgressOpen, "br-abc", "", testControlPort)
+	rules, err := EgressRules(EgressOpen, "br-abc", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -36,12 +34,12 @@ func TestOpenProfileInstallsNothing(t *testing.T) {
 }
 
 func TestUnknownProfileIsAnError(t *testing.T) {
-	if _, err := EgressRules("paranoid", "br-abc", "", testControlPort); err == nil {
+	if _, err := EgressRules("paranoid", "br-abc", nil); err == nil {
 		t.Fatal("an unknown profile must be an error, not a silent no-op")
 	}
 	// A missing bridge name would produce rules that match every interface on the
 	// box, including the VM's own uplink. That must fail, not install.
-	if _, err := EgressRules(EgressDesktop, "", "", testControlPort); err == nil {
+	if _, err := EgressRules(EgressDesktop, "", nil); err == nil {
 		t.Fatal("an empty bridge name must be refused")
 	}
 }
@@ -188,35 +186,23 @@ func TestRefusalMessageNamesTheFixes(t *testing.T) {
 	}
 }
 
-// The host-path rule must be port-scoped. A blanket drop from the bridge also
-// drops the gateway, which is the sandbox's first hop for the internet — measured
-// on a real VM, where the sandbox's default route became unreachable and it had
-// no network at all while the VM itself was online.
-func TestHostChainDropsOnlyTheControlPort(t *testing.T) {
-	rules := joined(rulesFor(t, EgressDesktop, "br-guino"))
-
-	var hostDrops []string
-	for _, r := range rules {
-		if strings.Contains(r, hostChain) && strings.Contains(r, "-j DROP") {
-			hostDrops = append(hostDrops, r)
+// A sandbox host runs more than Guino (SSH, the Docker daemon's listeners), so
+// every new connection from the bridge to the host is dropped, after the reply
+// exemption that keeps the host-to-sandbox proxy working.
+func TestHostChainDropsAllNewInboundFromTheBridge(t *testing.T) {
+	var host []string
+	for _, r := range joined(rulesFor(t, EgressDesktop, "br-guino")) {
+		if strings.HasPrefix(r, "-A "+hostChain+" ") {
+			host = append(host, r)
 		}
 	}
-	if len(hostDrops) == 0 {
-		t.Fatal("nothing stops a sandbox reaching Guino on the gateway")
+	want := []string{
+		"-A " + hostChain + " -m conntrack --ctstate ESTABLISHED,RELATED --ctdir REPLY -j RETURN",
+		"-A " + hostChain + " -i br-guino -j DROP",
+		"-A " + hostChain + " -j RETURN",
 	}
-	for _, r := range hostDrops {
-		if !strings.Contains(r, "--dport 8080") {
-			t.Errorf("blanket drop would take the gateway with it: %q", r)
-		}
-	}
-	// Both transports, or the hole is open on one of them.
-	var tcp, udp bool
-	for _, r := range hostDrops {
-		tcp = tcp || strings.Contains(r, "-p tcp")
-		udp = udp || strings.Contains(r, "-p udp")
-	}
-	if !tcp || !udp {
-		t.Errorf("control port must be blocked on tcp and udp: %v", hostDrops)
+	if strings.Join(host, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("host chain:\n%s\nwant:\n%s", strings.Join(host, "\n"), strings.Join(want, "\n"))
 	}
 }
 
@@ -227,7 +213,7 @@ func TestHostChainDropsOnlyTheControlPort(t *testing.T) {
 // resolver it hands out inside 192.168.64.0/24 — the same range that blocks the
 // user's home router.
 func TestResolverIsExemptedForDNSOnly(t *testing.T) {
-	rules, err := EgressRules(EgressDesktop, "br-guino", "192.168.64.1", testControlPort)
+	rules, err := EgressRules(EgressDesktop, "br-guino", []string{"192.168.64.1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -273,32 +259,32 @@ func TestResolverIsExemptedForDNSOnly(t *testing.T) {
 	}
 
 	// No resolver: the plain denylist, unchanged.
-	plain, _ := EgressRules(EgressDesktop, "br-guino", "", testControlPort)
+	plain, _ := EgressRules(EgressDesktop, "br-guino", nil)
 	if len(plain) >= len(rules) {
 		t.Error("an empty resolver should add no rules")
 	}
 }
 
-// The control port comes from server.port. A hardcoded value would leave a
-// server on any other port reachable from its own sandboxes.
-func TestHostChainFollowsTheConfiguredPort(t *testing.T) {
-	rules, err := EgressRules(EgressDesktop, "br-guino", "", 9090)
+// runtime.sandbox_dns: exactly the configured resolvers get the DNS-only
+// exemption (on AWS the VPC resolver at base+2, not the gateway), nothing else.
+func TestConfiguredResolversAreEachExemptedForDNSOnly(t *testing.T) {
+	rules, err := EgressRules(EgressDesktop, "br-guino", []string{"172.31.0.2", "10.0.0.2"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	var drops int
+	var exempt []string
 	for _, r := range joined(rules) {
-		if strings.HasPrefix(r, "-A "+hostChain+" ") && strings.Contains(r, "-j DROP") {
-			drops++
-			if !strings.Contains(r, "--dport 9090") {
-				t.Errorf("host drop is not on the configured port: %q", r)
-			}
+		if strings.Contains(r, "--dport 53") {
+			exempt = append(exempt, r)
 		}
 	}
-	if drops != 2 {
-		t.Errorf("expected tcp and udp drops on 9090, got %d", drops)
+	want := []string{
+		"-A " + denChain + " -i br-guino -d 172.31.0.2 -p udp --dport 53 -j RETURN",
+		"-A " + denChain + " -i br-guino -d 172.31.0.2 -p tcp --dport 53 -j RETURN",
+		"-A " + denChain + " -i br-guino -d 10.0.0.2 -p udp --dport 53 -j RETURN",
+		"-A " + denChain + " -i br-guino -d 10.0.0.2 -p tcp --dport 53 -j RETURN",
 	}
-	if _, err := EgressRules(EgressDesktop, "br-guino", "", 0); err == nil {
-		t.Error("a missing control port must be refused")
+	if strings.Join(exempt, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("exemptions:\n%s\nwant:\n%s", strings.Join(exempt, "\n"), strings.Join(want, "\n"))
 	}
 }

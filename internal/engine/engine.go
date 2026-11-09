@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -30,19 +31,40 @@ var (
 	// ErrHostBindRejected is a host bind the server refuses: disabled, or outside
 	// every allowed root. The caller's to fix, so the API answers 422.
 	ErrHostBindRejected = errors.New("host bind rejected")
+	// ErrDraining refuses new placements on a host being emptied for removal.
+	ErrDraining = errors.New("host is draining")
+	// ErrArchiving is a sandbox whose state is being saved; it never runs again.
+	// It wraps ErrNotRunning, so every "not running" answer (409) covers it.
+	ErrArchiving = fmt.Errorf("%w: sandbox is archiving", ErrNotRunning)
+	// ErrInUse refuses an unforced archive of a leased or held sandbox.
+	ErrInUse = errors.New("sandbox is in use")
+	// ErrBusy is a lifecycle call while another (stop, start, destroy) runs.
+	ErrBusy = errors.New("sandbox is busy with another operation")
+	// ErrNoState is an archive of a sandbox created without a state target.
+	ErrNoState = errors.New("sandbox has no state target")
+	// ErrInvalidState is a create request with an unusable state target (400).
+	ErrInvalidState = errors.New("invalid state target")
+	// ErrRestoreKeyNotFound is a create whose restore_key does not exist (422).
+	ErrRestoreKeyNotFound = errors.New("restore_key not found")
 )
 
 // Engine orchestrates sandbox lifecycle.
 type Engine struct {
-	runtime         runtime.Runtime
-	store           store.Store
-	config          config.SandboxConfig
-	s3Config        config.S3Config
-	resourceConfig  config.ResourceConfig
-	netPolicy       netpolicy.Policy
-	sandboxes       sync.Map // map[string]*Sandbox
-	mu              sync.Mutex
-	count           int
+	runtime        runtime.Runtime
+	store          store.Store
+	config         config.SandboxConfig
+	s3Config       config.S3Config
+	resourceConfig config.ResourceConfig
+	netPolicy      netpolicy.Policy
+	sandboxes      sync.Map // map[string]*Sandbox
+	mu             sync.Mutex
+	count          int
+	// creating and draining are admission state, guarded by mu with count.
+	creating int
+	draining bool
+	// reapSem bounds the reaper's workers; inflight lets tests wait for them.
+	reapSem         chan struct{}
+	inflight        sync.WaitGroup
 	logger          *slog.Logger
 	stopCh          chan struct{}
 	shutdownOnce    sync.Once
@@ -63,6 +85,8 @@ func NewEngine(rt runtime.Runtime, st store.Store, cfg config.SandboxConfig, s3C
 		stopCh:         make(chan struct{}),
 		pressureCh:     make(chan PressureEvent, 16),
 	}
+	e.reapSem = make(chan struct{}, reapWorkers)
+	e.sweepStateTemp()
 
 	// Start pressure monitor with config-driven thresholds
 	backend := NewPlatformMemoryBackend()
@@ -80,7 +104,9 @@ func NewEngine(rt runtime.Runtime, st store.Store, cfg config.SandboxConfig, s3C
 	// Restore sandboxes from store
 	e.restoreFromStore()
 
-	// Start reaper goroutine
+	// One reaper pass at once, so an archive a restart cut off is finished
+	// without waiting for the first tick. It only hands work to goroutines.
+	e.reapExpired()
 	go e.reaper()
 
 	return e
@@ -224,24 +250,14 @@ func (e *Engine) CreateSandbox(ctx context.Context, cfg runtime.SandboxConfig) (
 	if err := e.netPolicy.ResolveAndValidate(&cfg); err != nil {
 		return nil, err
 	}
+	if err := e.validateState(&cfg); err != nil {
+		return nil, err
+	}
 
-	e.mu.Lock()
-	// Check pressure under lock to prevent TOCTOU race
-	if pressure := e.pressureMonitor.CurrentEvent(); pressure.Level >= PressureCritical {
-		e.mu.Unlock()
-		return nil, ErrPressureTooHigh
+	if err := e.admit(false, cfg.Storage); err != nil {
+		return nil, err
 	}
-	if e.count >= e.config.MaxSandboxes {
-		e.mu.Unlock()
-		return nil, ErrLimitReached
-	}
-	// Validate storage under mutex to prevent TOCTOU race on shared volume checks
-	if err := e.validateStorage(cfg.Storage); err != nil {
-		e.mu.Unlock()
-		return nil, fmt.Errorf("invalid storage config: %w", err)
-	}
-	e.count++
-	e.mu.Unlock()
+	defer e.doneCreating()
 
 	// Apply defaults
 	if cfg.Image == "" {
@@ -292,6 +308,7 @@ func (e *Engine) CreateSandbox(ctx context.Context, cfg runtime.SandboxConfig) (
 		Ports:     cfg.Ports,
 		CreatedAt: time.Now().UTC(),
 	}
+	sandbox.lastActivity = sandbox.CreatedAt
 	if timeout > 0 {
 		sandbox.Timeout = timeout
 		sandbox.ExpiresAt = sandbox.CreatedAt.Add(timeout)
@@ -303,14 +320,22 @@ func (e *Engine) CreateSandbox(ctx context.Context, cfg runtime.SandboxConfig) (
 		return nil, fmt.Errorf("creating sandbox: %w", err)
 	}
 
+	// Saved state goes in before anything runs. A missing key fails the create:
+	// starting empty would look like a lost workspace.
+	if cfg.State != nil && cfg.State.RestoreKey != "" {
+		if err := e.restoreState(ctx, id, cfg.State); err != nil {
+			e.discardContainer(ctx, sandbox)
+			return nil, fmt.Errorf("restoring state from %s: %w", cfg.State.RestoreKey, err)
+		}
+	}
+
 	// Start container
 	if err := e.runtime.Start(ctx, id); err != nil {
-		_ = e.runtime.Remove(ctx, id)
-		e.decrementCount()
+		e.discardContainer(ctx, sandbox)
 		return nil, fmt.Errorf("starting sandbox: %w", err)
 	}
 
-	sandbox.SetStatus(runtime.StatusRunning)
+	sandbox.setStatus(runtime.StatusRunning)
 
 	// Store sandbox before hooks so it's discoverable during S3 init
 	e.sandboxes.Store(id, sandbox)
@@ -349,18 +374,24 @@ func (e *Engine) ListSandboxes() []*Sandbox {
 	return sandboxes
 }
 
-// StopSandbox stops a sandbox without removing it.
+// StopSandbox stops a sandbox without removing it. Refused (409) while an
+// archive owns the sandbox; claimed for the call, so an archive cannot start
+// in between and be undone by the status set afterwards.
 func (e *Engine) StopSandbox(ctx context.Context, id string) error {
 	sandbox, err := e.GetSandbox(id)
 	if err != nil {
 		return err
 	}
+	if err := sandbox.claim(); err != nil {
+		return err
+	}
+	defer sandbox.release()
 
 	if err := e.runtime.Stop(ctx, id, 2*time.Second); err != nil {
 		return fmt.Errorf("stopping sandbox: %w", err)
 	}
 
-	sandbox.SetStatus(runtime.StatusStopped)
+	sandbox.setStatus(runtime.StatusStopped)
 	if err := e.saveSandbox(sandbox); err != nil {
 		e.logger.Warn("failed to save sandbox state after stop", "id", id, "error", err)
 	}
@@ -370,10 +401,20 @@ func (e *Engine) StopSandbox(ctx context.Context, id string) error {
 
 // StartSandbox starts a previously stopped sandbox without recreating it. The
 // container (and its named volumes) survive Stop, so Start restores the same
-// filesystem and identity.
+// filesystem and identity. Like Stop, it holds the sandbox for the call and
+// answers 409 while an archive owns it.
 func (e *Engine) StartSandbox(ctx context.Context, id string) error {
 	sandbox, err := e.GetSandbox(id)
 	if err != nil {
+		return err
+	}
+	if err := sandbox.claim(); err != nil {
+		return err
+	}
+	defer sandbox.release()
+	// A stopped container already holds its slot, so only draining and
+	// pressure can refuse a start.
+	if err := e.admit(true, nil); err != nil {
 		return err
 	}
 
@@ -381,7 +422,7 @@ func (e *Engine) StartSandbox(ctx context.Context, id string) error {
 		return fmt.Errorf("starting sandbox: %w", err)
 	}
 
-	sandbox.SetStatus(runtime.StatusRunning)
+	sandbox.setStatus(runtime.StatusRunning)
 	if err := e.saveSandbox(sandbox); err != nil {
 		e.logger.Warn("failed to save sandbox state after start", "id", id, "error", err)
 	}
@@ -401,12 +442,22 @@ func (e *Engine) Info(ctx context.Context, id string) (*runtime.SandboxInfo, err
 
 // DestroySandbox stops and removes a sandbox.
 func (e *Engine) DestroySandbox(ctx context.Context, id string) error {
-	// LoadAndDelete to prevent concurrent destroy of the same sandbox
-	v, loaded := e.sandboxes.LoadAndDelete(id)
-	if !loaded {
-		return ErrNotFound
+	sb, err := e.GetSandbox(id)
+	if err != nil {
+		return err
 	}
-	sb := v.(*Sandbox)
+	// One lifecycle operation at a time: an archive in progress answers 409.
+	// An archiving sandbox nobody is working on (a failed or stuck archive)
+	// may be destroyed: the caller accepts losing what was not saved.
+	archiving, err := sb.claimDestroy()
+	if err != nil {
+		return err
+	}
+	if archiving {
+		e.logger.Warn("destroying a sandbox whose archive did not finish, its unsaved state is lost", "id", id)
+	}
+	defer sb.release()
+	e.sandboxes.Delete(id)
 
 	// S3 hooks: upload files before stopping container (needs running container to read files)
 	if sb.Config.Storage != nil && sb.Config.Storage.S3 != nil && sb.Config.Storage.S3.Mode == runtime.S3SyncModeHooks {
@@ -441,6 +492,9 @@ func (e *Engine) resolveHostBinds(requested []runtime.HostBind) ([]runtime.HostB
 	}
 	out := make([]runtime.HostBind, 0, len(requested))
 	for _, b := range requested {
+		if err := e.createMissingBindDir(b); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrHostBindRejected, err)
+		}
 		got, err := netpolicy.ValidateHostBind(
 			netpolicy.HostBindRequest{
 				HostPath:  b.HostPath,
@@ -468,49 +522,53 @@ func (e *Engine) resolveHostBinds(requested []runtime.HostBind) ([]runtime.HostB
 }
 
 // requireRunning returns nil if the sandbox exists and is running, or the
-// reason it is not (not-found / not-running). Callers only need the gate, not
-// the sandbox value.
+// reason it is not (not-found / not-running / archiving). Callers only need
+// the gate, not the sandbox value.
 func (e *Engine) requireRunning(id string) error {
-	sb, err := e.GetSandbox(id)
+	release, err := e.acquire(id)
 	if err != nil {
 		return err
 	}
-	if sb.GetStatus() != runtime.StatusRunning {
-		return ErrNotRunning
-	}
-	// Every operation *on* a running sandbox is activity, and they all pass
-	// through here — exec, streams, files, and sessions via Exec. Deliberately
-	// not in GetSandbox or Info: a dashboard polling status would otherwise keep
-	// an abandoned sandbox alive forever, which is the opposite of the point.
-	sb.Touch()
+	release()
 	return nil
+}
+
+// acquire checks the sandbox is running and holds it in the same step, so an
+// archive cannot begin between the check and the operation. Every operation
+// *on* a running sandbox is activity, and they all pass through here: exec,
+// streams, files, and sessions via Exec. Deliberately not in GetSandbox or
+// Info: a dashboard polling status would otherwise keep an abandoned sandbox
+// alive forever, which is the opposite of the point.
+func (e *Engine) acquire(id string) (func(), error) {
+	sb, err := e.GetSandbox(id)
+	if err != nil {
+		return nil, err
+	}
+	return sb.acquire()
 }
 
 // Exec runs a command in a sandbox.
 func (e *Engine) Exec(ctx context.Context, id string, opts runtime.ExecOpts) (*runtime.ExecResult, error) {
-	if err := e.requireRunning(id); err != nil {
+	release, err := e.acquire(id)
+	if err != nil {
 		return nil, err
 	}
-	if sb, err := e.GetSandbox(id); err == nil {
-		defer sb.Hold()()
-	}
+	defer release()
 	return e.runtime.Exec(ctx, id, opts)
 }
 
 // ExecStream runs a streaming command in a sandbox.
 func (e *Engine) ExecStream(ctx context.Context, id string, opts runtime.ExecOpts) (runtime.ExecStream, error) {
-	if err := e.requireRunning(id); err != nil {
+	release, err := e.acquire(id)
+	if err != nil {
 		return nil, err
 	}
 	stream, err := e.runtime.ExecStream(ctx, id, opts)
 	if err != nil {
+		release()
 		return nil, err
 	}
-	sb, err := e.GetSandbox(id)
-	if err != nil {
-		return stream, nil
-	}
-	return &heldStream{ExecStream: stream, release: sb.Hold()}, nil
+	return &heldStream{ExecStream: stream, release: release}, nil
 }
 
 // heldStream keeps its sandbox from expiring until the stream is closed.
@@ -596,18 +654,10 @@ func (e *Engine) Snapshot(ctx context.Context, id string, name string) (*runtime
 
 // RestoreSnapshot restores a sandbox from a snapshot.
 func (e *Engine) RestoreSnapshot(ctx context.Context, snapshotID string) (*Sandbox, error) {
-	e.mu.Lock()
-	// Check pressure under lock
-	if pressure := e.pressureMonitor.CurrentEvent(); pressure.Level >= PressureCritical {
-		e.mu.Unlock()
-		return nil, ErrPressureTooHigh
+	if err := e.admit(false, nil); err != nil {
+		return nil, err
 	}
-	if e.count >= e.config.MaxSandboxes {
-		e.mu.Unlock()
-		return nil, ErrLimitReached
-	}
-	e.count++
-	e.mu.Unlock()
+	defer e.doneCreating()
 
 	snapRecord, err := e.store.GetSnapshot(snapshotID)
 	if err != nil {
@@ -672,8 +722,11 @@ func (e *Engine) Stats(ctx context.Context, id string) (*runtime.SandboxStats, e
 	return e.runtime.Stats(ctx, id)
 }
 
-// Shutdown gracefully stops all sandboxes.
-// Uses a detached context so shutdown is not cancelled by the caller's context.
+// Shutdown stops the engine. Sandboxes with a state target are left running
+// and restored by the next start (restoreFromStore), so restarting Guino on a
+// sandbox host never takes an agent's machine with it; they are saved one last
+// time so the latest lease and activity survive. Sandboxes without state are
+// destroyed as before: nothing would bring them back.
 func (e *Engine) Shutdown(_ context.Context) {
 	e.shutdownOnce.Do(func() {
 		e.pressureMonitor.Stop() // Wait for monitor goroutine to finish before closing stopCh
@@ -683,23 +736,19 @@ func (e *Engine) Shutdown(_ context.Context) {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		// Collect IDs first to avoid concurrent modification during Range
-		var ids []string
-		e.sandboxes.Range(func(key, _ any) bool {
-			ids = append(ids, key.(string))
-			return true
-		})
-
-		// Destroy sandboxes in parallel for faster shutdown
 		var wg sync.WaitGroup
-		for _, id := range ids {
+		for _, sb := range e.ListSandboxes() {
+			if sb.Config.State != nil {
+				e.saveQuietly(sb)
+				continue
+			}
 			wg.Add(1)
 			go func(id string) {
 				defer wg.Done()
 				if err := e.DestroySandbox(shutdownCtx, id); err != nil {
 					e.logger.Warn("failed to destroy sandbox on shutdown", "id", id, "error", err)
 				}
-			}(id)
+			}(sb.ID)
 		}
 		wg.Wait()
 	})
@@ -719,18 +768,62 @@ func (e *Engine) reaper() {
 	}
 }
 
+// reapWorkers bounds the reaper's concurrent work (archives, removes,
+// destroys). Each runs on its own goroutine with a timeout, so a stuck Docker
+// or S3 call holds one worker, never the reaper.
+const reapWorkers = 2
+
+// reapTimeout bounds one destroy or remove started by the reaper.
+const reapTimeout = time.Minute
+
+// reapExpired hands every sandbox that has work due to a worker: an archive
+// that did not finish, an idle sandbox with a state target (archived), and
+// any other idle sandbox (destroyed). When both workers are busy the rest
+// wait for the next tick.
 func (e *Engine) reapExpired() {
-	ctx := context.Background()
+	now := time.Now()
 	e.sandboxes.Range(func(_, value any) bool {
-		sandbox := value.(*Sandbox)
-		if sandbox.IsExpired() {
-			e.logger.Info("reaping expired sandbox", "id", sandbox.ID)
-			if err := e.DestroySandbox(ctx, sandbox.ID); err != nil {
-				e.logger.Warn("failed to reap sandbox", "id", sandbox.ID, "error", err)
-			}
+		sb := value.(*Sandbox)
+		if !sb.due(now) {
+			return true
 		}
+		select {
+		case e.reapSem <- struct{}{}:
+		default:
+			return false
+		}
+		e.inflight.Add(1)
+		go func() {
+			defer e.inflight.Done()
+			defer func() { <-e.reapSem }()
+			e.reapOne(sb, now)
+		}()
 		return true
 	})
+}
+
+func (e *Engine) reapOne(sb *Sandbox, now time.Time) {
+	switch {
+	case sb.claimResume(now):
+		if err := e.resumeArchive(sb); err != nil {
+			e.logger.Warn("failed to finish archive", "id", sb.ID, "error", err)
+		}
+	case !sb.IsExpired():
+	case sb.Config.State != nil && !sb.isNeverStarted():
+		e.logger.Info("archiving idle sandbox", "id", sb.ID)
+		err := e.ArchiveSandbox(context.Background(), sb.ID, false)
+		if err != nil && !errors.Is(err, ErrInUse) && !errors.Is(err, ErrArchiving) && !errors.Is(err, ErrBusy) {
+			e.logger.Warn("failed to archive idle sandbox", "id", sb.ID, "error", err)
+		}
+	default:
+		e.logger.Info("reaping expired sandbox", "id", sb.ID)
+		ctx, cancel := context.WithTimeout(context.Background(), reapTimeout)
+		defer cancel()
+		if err := e.DestroySandbox(ctx, sb.ID); err != nil && !errors.Is(err, ErrBusy) && !errors.Is(err, ErrNotFound) {
+			sb.failed()
+			e.logger.Warn("failed to reap sandbox", "id", sb.ID, "error", err)
+		}
+	}
 }
 
 func (e *Engine) restoreFromStore() {
@@ -755,13 +848,45 @@ func (e *Engine) restoreFromStore() {
 			continue
 		}
 
+		var cfg runtime.SandboxConfig
+		if len(r.Config) > 0 {
+			if err := json.Unmarshal(r.Config, &cfg); err != nil {
+				e.logger.Warn("unreadable sandbox config in store, restoring without it", "id", r.ID, "error", err)
+			}
+		}
+		if cfg.Labels == nil {
+			cfg.Labels = r.Labels
+		}
 		sandbox := &Sandbox{
-			ID:        r.ID,
-			Image:     r.Image,
-			status:    info.Status,
-			CreatedAt: r.CreatedAt,
-			ExpiresAt: r.ExpiresAt,
-			Timeout:   r.Timeout,
+			ID:              r.ID,
+			Image:           r.Image,
+			status:          info.Status,
+			Config:          cfg,
+			Ports:           cfg.Ports,
+			CreatedAt:       r.CreatedAt,
+			ExpiresAt:       r.ExpiresAt,
+			Timeout:         r.Timeout,
+			leasedUntil:     r.LeasedUntil,
+			lastLeasedAt:    r.LastLeasedAt,
+			archiveUploaded: r.ArchiveUploaded,
+			neverStarted:    r.NeverStarted,
+			stuck:           r.Stuck,
+		}
+		// An archive had begun before the restart (maybe its upload even
+		// finished): the sandbox must never run again, whatever Docker says. The
+		// reaper finishes it: a fresh upload (or a true 412) and the remove.
+		if r.ArchiveUploaded || r.Status == string(runtime.StatusArchiving) {
+			sandbox.status = runtime.StatusArchiving
+		} else if info.Paused {
+			// Frozen by an archive whose unpause failed before the restart, and
+			// not archiving: give it back.
+			uctx, cancel := context.WithTimeout(ctx, reapTimeout)
+			if err := e.runtime.Unpause(uctx, r.ID); err != nil {
+				e.logger.Warn("failed to unpause a restored sandbox", "id", r.ID, "error", err)
+			} else {
+				sandbox.status = runtime.StatusRunning
+			}
+			cancel()
 		}
 		// Records written before Timeout was persisted held a fixed deadline of
 		// created+timeout, which recovers the window exactly.
@@ -771,7 +896,11 @@ func (e *Engine) restoreFromStore() {
 		// Touches are not persisted, so the stored deadline is stale. A restart
 		// is not idleness: give each sandbox a fresh window rather than reaping
 		// one that was in use a moment ago. No-op for records without a Timeout.
+		// The recorded last activity is kept for the controller.
 		sandbox.Touch()
+		if !r.LastActivity.IsZero() {
+			sandbox.lastActivity = r.LastActivity
+		}
 		e.sandboxes.Store(r.ID, sandbox)
 		e.count++
 		restored++
@@ -784,14 +913,7 @@ func (e *Engine) restoreFromStore() {
 }
 
 func (e *Engine) saveSandbox(sandbox *Sandbox) error {
-	return e.store.SaveSandbox(&store.SandboxRecord{
-		ID:        sandbox.ID,
-		Image:     sandbox.Image,
-		Status:    string(sandbox.GetStatus()),
-		CreatedAt: sandbox.CreatedAt,
-		ExpiresAt: sandbox.Expiry(),
-		Timeout:   sandbox.Timeout,
-	})
+	return e.store.SaveSandbox(sandbox.record())
 }
 
 const (
@@ -1045,4 +1167,49 @@ func (e *Engine) decrementCount() {
 		e.count = 0
 	}
 	e.mu.Unlock()
+}
+
+// createMissingBindDir creates a host bind's source directory when it does not
+// exist yet (a project workspace on a shared mount, first placement), and only
+// inside a writable allowed root: the directories are made through os.Root,
+// which refuses any path that would leave the root, symlinks included. The
+// result then goes through the usual validation like any existing path.
+func (e *Engine) createMissingBindDir(b runtime.HostBind) error {
+	p := b.HostPath
+	if _, err := os.Lstat(p); err == nil || !errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if !filepath.IsAbs(p) || filepath.Clean(p) != p {
+		return fmt.Errorf("host_path %q must be absolute and clean to be created", p)
+	}
+	for _, root := range e.netPolicy.HostBindRoots {
+		if root.ReadOnly {
+			continue
+		}
+		// The request may name the root as configured or as resolved.
+		bases := []string{root.Path}
+		if real, err := filepath.EvalSymlinks(root.Path); err == nil && real != root.Path {
+			bases = append(bases, real)
+		}
+		for _, base := range bases {
+			rel, err := filepath.Rel(base, p)
+			if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				continue
+			}
+			return mkdirInRoot(base, rel)
+		}
+	}
+	return fmt.Errorf("host_path %q does not exist and is not inside a writable allowed root", p)
+}
+
+func mkdirInRoot(base, rel string) error {
+	r, err := os.OpenRoot(base)
+	if err != nil {
+		return fmt.Errorf("opening host bind root %q: %w", base, err)
+	}
+	defer func() { _ = r.Close() }()
+	if err := r.MkdirAll(rel, 0o755); err != nil {
+		return fmt.Errorf("creating %q under %q: %w", rel, base, err)
+	}
+	return nil
 }

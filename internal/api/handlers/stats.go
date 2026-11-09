@@ -53,9 +53,18 @@ func (h *StatsHandler) SystemStats(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
+	// The original totals, plus the host view a controller places sandboxes
+	// and removes hosts by (engine.HostStats).
+	hs := h.engine.HostStats()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total_sandboxes":   len(sandboxes),
 		"running_sandboxes": running,
 		"stopped_sandboxes": stopped,
+		"draining":          hs.Draining,
+		"slots":             hs.Slots,
+		"count":             hs.Count,
+		"creating":          hs.Creating,
+		"archiving":         hs.Archiving,
+		"sandboxes":         hs.Sandboxes,
 	})
 }
