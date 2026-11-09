@@ -1188,8 +1188,8 @@ func (e *Engine) createMissingBindDir(b runtime.HostBind) error {
 		}
 		// The request may name the root as configured or as resolved.
 		bases := []string{root.Path}
-		if real, err := filepath.EvalSymlinks(root.Path); err == nil && real != root.Path {
-			bases = append(bases, real)
+		if resolved, err := filepath.EvalSymlinks(root.Path); err == nil && resolved != root.Path {
+			bases = append(bases, resolved)
 		}
 		for _, base := range bases {
 			rel, err := filepath.Rel(base, p)

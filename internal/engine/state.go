@@ -512,7 +512,8 @@ func (f *stateFilter) copy(tr *tar.Reader, tw *tar.Writer, parent string) error 
 
 // keep rewrites hdr for the archive and reports whether it passes.
 func (f *stateFilter) keep(hdr *tar.Header, parent string) bool {
-	name := path.Join(parent, hdr.Name)
+	// path.Join cleans dot segments; the result is then held under the state paths.
+	name := path.Join(parent, hdr.Name) //nolint:gosec // G305: checked by underStatePaths below
 	if !underStatePaths(name, f.paths) {
 		return false
 	}
@@ -527,7 +528,7 @@ func (f *stateFilter) keep(hdr *tar.Header, parent string) bool {
 	switch hdr.Typeflag {
 	case tar.TypeReg, tar.TypeDir, tar.TypeSymlink:
 	case tar.TypeLink:
-		target := path.Join(parent, hdr.Linkname)
+		target := path.Join(parent, hdr.Linkname) //nolint:gosec // G305: must be an accepted regular file, so under the state paths
 		if f.accepted[target] != tar.TypeReg {
 			return false
 		}

@@ -129,8 +129,6 @@ type SandboxConfig struct {
 	State StateConfig `koanf:"state"`
 }
 
-// HostBindRoot is a host directory sandboxes may bind from. Mirrors
-// netpolicy.HostBindRoot field for field (config stays an import leaf).
 // StateConfig bounds sandbox state archives. The bucket and key prefix are the
 // server's, not the caller's: a request may only name keys under the prefix.
 type StateConfig struct {
@@ -144,6 +142,8 @@ type StateConfig struct {
 	TempDir string `koanf:"-"`
 }
 
+// HostBindRoot is a host directory sandboxes may bind from. Mirrors
+// netpolicy.HostBindRoot field for field (config stays an import leaf).
 type HostBindRoot struct {
 	Path     string `koanf:"path"`
 	ReadOnly bool   `koanf:"read_only"`
