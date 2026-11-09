@@ -32,12 +32,12 @@ import (
 func blockCopy(env *stateEnv) (release chan struct{}, peak func() int) {
 	release = make(chan struct{})
 	var mu sync.Mutex
-	running, max := 0, 0
+	running, most := 0, 0
 	env.mock.CopyFromFn = func(_ string, p string) (io.ReadCloser, error) {
 		mu.Lock()
 		running++
-		if running > max {
-			max = running
+		if running > most {
+			most = running
 		}
 		mu.Unlock()
 		<-release
@@ -46,7 +46,7 @@ func blockCopy(env *stateEnv) (release chan struct{}, peak func() int) {
 		mu.Unlock()
 		return tarFiles(map[string]string{path.Base(p) + "/state": "x"}), nil
 	}
-	return release, func() int { mu.Lock(); defer mu.Unlock(); return max }
+	return release, func() int { mu.Lock(); defer mu.Unlock(); return most }
 }
 
 func tarFiles(files map[string]string) io.ReadCloser {
