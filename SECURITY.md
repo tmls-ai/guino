@@ -28,7 +28,7 @@ The runtime applies the following controls:
 - **Network posture**: `network_mode` ∈ `internal` (default) / `bridge` / `none`. **`none` disables external networking (container loopback remains)**; `internal` still reaches the bridge gateway, embedded DNS and host `0.0.0.0` services (see Known Limitations)
 - **Port binding**: published only in `bridge` mode, bound to `127.0.0.1`; fixed at creation (no runtime add/remove, `501`)
 - **Sandbox proxy**: `/api/v1/sandboxes/{id}/proxy/{port}/...` forwards HTTP and WebSocket traffic to the sandbox's own IP only (the caller chooses the port, never the host), behind the same API key as every other route; `X-API-Key` and `Authorization` are stripped before forwarding, environment proxy settings are ignored, and browser WebSocket upgrades must come from `server.allowed_origins`. Proxied responses are sandbox-controlled content served on the API origin, so front them with a separate origin before showing them in a browser
-- **Egress profile** (opt-in): `runtime.egress_profile: desktop` installs iptables rules on the managed bridge that drop private, CGNAT, link-local (including `169.254.169.254`), loopback, multicast and reserved IPv4 ranges and Guino's own `server.port`; startup refuses if they cannot be installed. See §(8)
+- **Egress profile** (opt-in): `runtime.egress_profile: desktop` installs iptables rules on the managed bridge that drop private, CGNAT, link-local (including `169.254.169.254`), loopback, multicast and reserved IPv4 ranges and every new connection from the bridge to the host itself (Guino's port, SSH, the Docker daemon); startup refuses if they cannot be installed. See §(8)
 - **Host binds** (opt-in): `sandbox.allow_host_binds` mounts only directories inside `sandbox.host_bind_roots`, compared after symlink resolution; system paths, anything inside them and their ancestors are refused, and `serve` refuses to start with host binds unless auth is enabled on a loopback listener
 - **Path validation**: Null byte and traversal protection on all file operations
 - **Constant-time auth**: API key comparison resistant to timing attacks
@@ -164,11 +164,12 @@ for a dedicated sandbox VM where Guino is root next to the Docker daemon: it ins
 `GUINO-EGRESS` (from `DOCKER-USER`) and `GUINO-EGRESS-HOST` (from `INPUT`) chains
 scoped to the managed bridge interface. They drop `10/8`, `172.16/12`, `192.168/16`,
 `100.64/10`, `169.254/16`, `127/8`, `0/8`, `224/4` and `240/4`, allow DNS only to the
-VM's default gateway, and drop sandbox traffic to `server.port` on any local address.
+VM's default gateway (or only to `runtime.sandbox_dns` when set), and drop every new connection from the bridge to the host
+itself (only replies to connections the host opened, such as the sandbox proxy,
+pass).
 Both chains are replaced in one `iptables-restore --noflush` commit and existing
 jumps are left in place, so a restart never leaves running sandboxes unfiltered, and only reply-direction conntrack state skips the denylist. It is IPv4
-only (the managed network has IPv6 disabled) and does not filter other services
-listening on the VM itself. Switching back to `open` leaves the chains in place. Per-`internal` egress filtering remains a
+only (the managed network has IPv6 disabled) and covers every service listening on the VM itself. Switching back to `open` leaves the chains in place. Per-`internal` egress filtering remains a
 tracked follow-up. Do not assume `internal` will gain egress filtering without an
 explicit release note.
 
@@ -216,6 +217,11 @@ Setting `platform_override` is risk-equivalent to `allow_unsafe_bind`: both tell
 guard to permit a bind it would otherwise refuse. The difference is intent
 documentation, not a stronger guarantee. It is **bind-guard-scoped** — it is not a
 platform fact consulted anywhere else, and it relaxes no other control.
+
+### Accepted risks on autoscaled sandbox hosts
+
+- **Cloud metadata**: a sandbox reaching the instance metadata service is stopped by the host, not by Guino: hosts set the IMDSv2 hop limit to 1 (host image, set outside this repository). The `desktop` egress profile also drops `169.254/16`.
+- **Sandbox to sandbox under gVisor**: isolation between sandboxes on one host relies on ICC off on the managed network plus `NET_RAW` being dropped (`CapDrop: ALL`). It is to be tested on the staging host before production traffic.
 
 ## Known Limitations
 

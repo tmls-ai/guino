@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -48,6 +49,8 @@ func mcpCmd() *cobra.Command {
 				docker.WithNetworkMode(runtime.NetworkMode(cfg.Runtime.DefaultNetworkMode)),
 				docker.WithReconcileNetwork(cfg.Runtime.ReconcileNetwork),
 				docker.WithAllowUnsafeBridge(cfg.Runtime.AllowUnsafeBridge),
+				docker.WithOCIRuntime(cfg.Runtime.OCIRuntime),
+				docker.WithDNS(cfg.Runtime.SandboxDNS, sandboxResolvConfPath(cfg)),
 				docker.WithLogger(logger),
 			)
 			if err != nil {
@@ -78,6 +81,7 @@ func mcpCmd() *cobra.Command {
 				return err
 			}
 
+			cfg.Sandbox.State.TempDir = filepath.Join(filepath.Dir(cfg.Store.Path), "state-tmp")
 			eng := engine.NewEngine(rt, st, cfg.Sandbox, cfg.S3, cfg.Resource,
 				netpolicy.Policy{DefaultMode: runtime.NetworkMode(cfg.Runtime.DefaultNetworkMode)},
 				logger)

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -53,6 +55,9 @@ type DockerRuntime struct {
 	networkMode       runtime.NetworkMode
 	reconcileNetwork  bool
 	allowUnsafeBridge bool
+	ociRuntime        string
+	resolvConf        string // host file mounted at /etc/resolv.conf; empty = Docker's
+	resolvConfData    string
 	logger            *slog.Logger
 }
 
@@ -92,6 +97,34 @@ func WithAllowUnsafeBridge(allowed bool) Option {
 	}
 }
 
+// WithOCIRuntime sets the OCI runtime every sandbox container runs under (for
+// example "runsc" for gVisor). Empty keeps the daemon default.
+func WithOCIRuntime(name string) Option {
+	return func(r *DockerRuntime) {
+		r.ociRuntime = name
+	}
+}
+
+// WithDNS makes every sandbox resolve through servers. Docker's own --dns does
+// not do it on a user-defined network: resolv.conf there always names the
+// embedded resolver at 127.0.0.11, which gVisor cannot reach (measured: under
+// runsc, with and without --dns, "connection refused"). So the servers are
+// written to path on the host, and that file is mounted read-only over
+// /etc/resolv.conf. No servers keeps Docker's default.
+func WithDNS(servers []string, path string) Option {
+	return func(r *DockerRuntime) {
+		if len(servers) == 0 {
+			return
+		}
+		var b strings.Builder
+		for _, s := range servers {
+			b.WriteString("nameserver " + s + "\n")
+		}
+		r.resolvConf = path
+		r.resolvConfData = b.String()
+	}
+}
+
 // WithLogger sets the logger.
 func WithLogger(l *slog.Logger) Option {
 	return func(r *DockerRuntime) {
@@ -114,6 +147,11 @@ func New(opts ...Option) (*DockerRuntime, error) {
 	}
 	for _, opt := range opts {
 		opt(r)
+	}
+	if r.resolvConf != "" {
+		if err := writeFileAtomic(r.resolvConf, []byte(r.resolvConfData)); err != nil {
+			return nil, fmt.Errorf("writing sandbox resolv.conf: %w", err)
+		}
 	}
 	return r, nil
 }
@@ -397,6 +435,8 @@ func (r *DockerRuntime) Create(ctx context.Context, id string, cfg runtime.Sandb
 	if err != nil {
 		return err
 	}
+	hostCfg.Runtime = r.ociRuntime
+	hostCfg.Mounts = withResolvConf(hostCfg.Mounts, r.resolvConf)
 
 	containerName := "den-" + id
 
@@ -648,6 +688,16 @@ func (r *DockerRuntime) Start(ctx context.Context, id string) error {
 	return r.cli.ContainerStart(ctx, r.containerName(id), container.StartOptions{})
 }
 
+// Pause freezes the container's processes.
+func (r *DockerRuntime) Pause(ctx context.Context, id string) error {
+	return r.cli.ContainerPause(ctx, r.containerName(id))
+}
+
+// Unpause resumes a paused container.
+func (r *DockerRuntime) Unpause(ctx context.Context, id string) error {
+	return r.cli.ContainerUnpause(ctx, r.containerName(id))
+}
+
 // Stop stops the container with the given timeout.
 func (r *DockerRuntime) Stop(ctx context.Context, id string, timeout time.Duration) error {
 	timeoutSec := int(timeout.Seconds())
@@ -655,12 +705,17 @@ func (r *DockerRuntime) Stop(ctx context.Context, id string, timeout time.Durati
 	return r.cli.ContainerStop(ctx, r.containerName(id), opts)
 }
 
-// Remove forcefully removes the container.
+// Remove forcefully removes the container. A container that is already gone
+// counts as removed, so a retried remove (after an archive, or a restart) ends.
 func (r *DockerRuntime) Remove(ctx context.Context, id string) error {
-	return r.cli.ContainerRemove(ctx, r.containerName(id), container.RemoveOptions{
+	err := r.cli.ContainerRemove(ctx, r.containerName(id), container.RemoveOptions{
 		Force:         true,
 		RemoveVolumes: false, // Preserve named volumes (may be shared between sandboxes)
 	})
+	if cerrdefs.IsNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 // Info returns information about the sandbox container.
@@ -713,6 +768,7 @@ func (r *DockerRuntime) Info(ctx context.Context, id string) (*runtime.SandboxIn
 		Labels:    inspect.Config.Labels,
 		Pid:       inspect.State.Pid,
 		IP:        ip,
+		Paused:    inspect.State != nil && inspect.State.Paused,
 	}, nil
 }
 
@@ -801,4 +857,40 @@ func mapContainerStatus(state *container.State) runtime.SandboxStatus {
 	default:
 		return runtime.StatusStopped
 	}
+}
+
+// withResolvConf adds the read-only /etc/resolv.conf mount when a sandbox DNS
+// file is configured.
+func withResolvConf(mounts []dockermount.Mount, path string) []dockermount.Mount {
+	if path == "" {
+		return mounts
+	}
+	return append(mounts, dockermount.Mount{
+		Type:     dockermount.TypeBind,
+		Source:   path,
+		Target:   "/etc/resolv.conf",
+		ReadOnly: true,
+	})
+}
+
+// writeFileAtomic writes a temp file beside path and renames it over path, so
+// a running sandbox that has path mounted never sees it half written.
+func writeFileAtomic(path string, data []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".guino-resolv-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(f.Name()) }() // no-op once renamed
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Chmod(0o644); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
 }

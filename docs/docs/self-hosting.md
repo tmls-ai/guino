@@ -14,7 +14,7 @@ One Guino process must own a database and its Docker resources. Do not run multi
 
 Preserve the store file, Docker volumes and snapshot images when upgrading. `den.db`, `den-net`, `den.*` labels, and existing snapshot/volume prefixes are persisted runtime identifiers. Stop the runtime before making a consistent file backup; use Docker-aware backups for volume data and image snapshots. A database copy alone does not back up container data.
 
-Graceful API server shutdown destroys running sandboxes. Tmpfs data is temporary. Abrupt shutdown may leave resources for startup reconciliation; the expiry loop needs a running engine. Keep important artifacts in backed-up volumes or export them explicitly.
+Graceful API server shutdown destroys running sandboxes, except those with a `state` target, which keep running and are restored by the next start. Tmpfs data is temporary. Abrupt shutdown may leave resources for startup reconciliation; the expiry loop needs a running engine. Keep important artifacts in backed-up volumes or export them explicitly.
 
 ## Docker topology
 

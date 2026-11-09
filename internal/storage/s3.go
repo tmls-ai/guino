@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 
 	serverconfig "github.com/tmls-ai/guino/internal/config"
 	"github.com/tmls-ai/guino/internal/runtime"
@@ -207,9 +209,14 @@ func ssrfPinnedHTTPClient(ctx context.Context, endpoint string, allowInternal bo
 func NewS3Client(ctx context.Context, creds *S3Credentials, logger *slog.Logger) (*S3Client, error) {
 	opts := []func(*awsconfig.LoadOptions) error{
 		awsconfig.WithRegion(creds.Region),
-		awsconfig.WithCredentialsProvider(
+	}
+	// No static keys means the SDK's default chain: on a cloud host that is the
+	// instance role, which is how archived sandbox state reaches its bucket.
+	// ResolveS3Credentials never returns empty keys, so its callers are unchanged.
+	if creds.AccessKey != "" {
+		opts = append(opts, awsconfig.WithCredentialsProvider(
 			credentials.NewStaticCredentialsProvider(creds.AccessKey, creds.SecretKey, ""),
-		),
+		))
 	}
 
 	// When using a custom endpoint, inject the pinned SSRF-aware client to
@@ -246,6 +253,10 @@ func (c *S3Client) Download(ctx context.Context, bucket, key string) (io.ReadClo
 		Key:    &key,
 	})
 	if err != nil {
+		var re *smithyhttp.ResponseError
+		if errors.As(err, &re) && re.HTTPStatusCode() == http.StatusNotFound {
+			return nil, 0, fmt.Errorf("s3://%s/%s: %w", bucket, key, ErrObjectNotFound)
+		}
 		return nil, 0, fmt.Errorf("downloading s3://%s/%s: %w", bucket, key, err)
 	}
 	size := int64(0)
@@ -303,4 +314,31 @@ func (c *S3Client) ListObjects(ctx context.Context, bucket, prefix string, maxKe
 		}
 	}
 	return keys, nil
+}
+
+// ErrObjectExists is a conditional upload refused because the key is taken.
+var ErrObjectExists = errors.New("object already exists")
+
+// ErrObjectNotFound is a download of a key that does not exist (404).
+var ErrObjectNotFound = errors.New("object not found")
+
+// UploadIfAbsent uploads with If-None-Match: *, so an existing key is never
+// overwritten. A 412 is returned as ErrObjectExists.
+func (c *S3Client) UploadIfAbsent(ctx context.Context, bucket, key string, body io.Reader, size int64) error {
+	anyETag := "*"
+	input := &s3.PutObjectInput{
+		Bucket:        &bucket,
+		Key:           &key,
+		Body:          body,
+		ContentLength: &size,
+		IfNoneMatch:   &anyETag,
+	}
+	if _, err := c.client.PutObject(ctx, input); err != nil {
+		var re *smithyhttp.ResponseError
+		if errors.As(err, &re) && re.HTTPStatusCode() == http.StatusPreconditionFailed {
+			return fmt.Errorf("s3://%s/%s: %w", bucket, key, ErrObjectExists)
+		}
+		return fmt.Errorf("uploading to s3://%s/%s: %w", bucket, key, err)
+	}
+	return nil
 }

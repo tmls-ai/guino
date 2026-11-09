@@ -214,6 +214,70 @@ Response `204 No Content`
 
 Error: `404` — Sandbox not found
 
+
+### Labels and State
+
+`POST /api/v1/sandboxes` also takes `labels` (a string map stored on the container, returned by Get and Stats) and `state`:
+
+```json
+{
+  "image": "my-image",
+  "writable_rootfs": true,
+  "labels": {"project": "p1"},
+  "state": {
+    "bucket": "machines",
+    "restore_key": "p1/state/41.tar.zst",
+    "archive_key": "p1/state/42.tar.zst",
+    "paths": ["/root", "/home/user"]
+  }
+}
+```
+
+With `restore_key`, the tar.zst is downloaded and copied into the container before it starts; a missing key answers `422` with `"code": "restore_key_not_found"` and takes no slot. `archive_key` must be new for every placement. `state` needs `writable_rootfs`. The bucket is the server's `sandbox.state.bucket` (a request may repeat it, never change it; without it every `state` request answers `400`), and both keys must start with `sandbox.state.key_prefix` and contain no `..`, leading `/` or backslash. An archive holds only regular files, directories, symlinks and hard links within the archive, under `paths`, with setuid and setgid cleared; restore filters the same way. The file sizes of one archive, and the compressed size read on restore, are capped by `sandbox.state.max_bytes` (default 2 GiB). The container is paused while it is copied. Credentials come from the server's `s3` settings (the default AWS chain when `access_key` is empty). Under gVisor, `runsc` must run with `--overlay2=none`, or the archive cannot see what the sandbox wrote.
+
+`GET /api/v1/sandboxes/{id}` also returns `labels`, `leased_until`, `last_leased_at` and `last_activity` (each omitted until set).
+
+Admission: create, start and snapshot restore answer `409` (`draining`), `429` (sandbox limit) or `503` (memory pressure). A caller treats all three as "pick another host". Start checks only draining and pressure.
+
+### Lease Sandbox
+
+```
+POST /api/v1/sandboxes/{id}/lease
+{"ttl_seconds": 120}
+```
+
+While leased, the sandbox is neither archived nor reaped, whatever its traffic. Counts as activity. `ttl_seconds` is 1 to 3600.
+
+Response `200 OK`: `{"leased_until": "2026-11-06T14:29:40Z"}`
+
+Errors: `404` gone, `409` archiving.
+
+### Archive Sandbox
+
+```
+POST /api/v1/sandboxes/{id}/archive[?force=true]
+```
+
+Writes the state `paths` as one tar.zst to `archive_key` (with `If-None-Match: *`; an existing object counts as success) and removes the container. Afterwards the sandbox is gone (`404`). The idle reaper does the same for a sandbox with `state`, instead of destroying it. Without `force`, a live lease or a held operation (exec, proxied WebSocket) answers `409`.
+
+If the upload fails the container stays, the sandbox is running again and the call answers `500`. Once the upload has succeeded the sandbox stays `archiving` (lease, exec and archive answer `409`) until its container is removed; a failed remove is retried by the reaper and after a restart.
+
+Response `200 OK`: `{"status": "archived"}`
+
+While an archive owns a sandbox, stop, start and delete answer `409`, as they do while another of them is running. The reaper runs at most two archives or destroys at once and backs a failing sandbox off (1, 2, 5, then 10 minutes).
+
+### Drain
+
+```
+POST /api/v1/drain
+```
+
+From now on create, start and snapshot restore answer `409`. Idempotent; not kept across a restart. A host may be removed only when a drain answers `count` 0.
+
+Response `200 OK`: `{"draining": true, "count": 1}`
+
+Guino shutdown leaves sandboxes with a `state` target running and destroys the others; a restart restores the kept ones (config, labels, ports, lease, state target). An archive that had begun before a restart comes back `archiving` and is finished by the reaper (a fresh upload or a true 412, then the remove). Lease, archive and drain answer `403` when `auth.enabled` is off.
+
 ---
 
 ## Command Execution
@@ -705,9 +769,20 @@ Response `200 OK`:
   "total_sandboxes": 5,
   "running_sandboxes": 3,
   "stopped_sandboxes": 2,
-  "total_snapshots": 2
+  "draining": false,
+  "slots": 50,
+  "count": 5,
+  "creating": 0,
+  "archiving": 0,
+  "sandboxes": [
+    {"id": "d2k5q1j6n3", "status": "running", "labels": {"project": "p1"}, "created_at": "2026-11-06T14:16:52Z", "leased_until": "2026-11-06T14:29:40Z", "last_leased_at": "2026-11-06T14:19:40Z", "last_activity": "2026-11-06T14:19:40Z"}
+  ]
 }
 ```
+
+`count` is every container that exists (dropped only after its container is removed), `creating` the ones not yet started, `slots` is `max_sandboxes`.
+
+A sandbox with `"stuck": true` is an archive that cannot succeed (its state is over `sandbox.state.max_bytes`). Guino does not retry it; it stays `archiving` and holds its slot. A controller draining the host settles it with `DELETE /api/v1/sandboxes/{id}`, which gives up the unsaved state.
 
 ---
 

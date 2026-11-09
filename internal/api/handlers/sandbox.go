@@ -46,6 +46,11 @@ type createSandboxRequest struct {
 	// created, and a request may only narrow a root — never widen one, and never
 	// name a path outside them.
 	HostBinds []runtime.HostBind `json:"host_binds,omitempty"`
+	// Labels are stored on the container and reported by stats, so a caller can
+	// find its sandboxes on a host it did not create them on.
+	Labels map[string]string `json:"labels,omitempty"`
+	// State makes the sandbox's state outlive the host (restore and archive).
+	State *runtime.StateTarget `json:"state,omitempty"`
 }
 
 type sandboxResponse struct {
@@ -56,16 +61,26 @@ type sandboxResponse struct {
 	ExpiresAt time.Time             `json:"expires_at,omitempty"`
 	Ports     []runtime.PortMapping `json:"ports,omitempty"`
 	IP        string                `json:"ip,omitempty"`
+	Labels    map[string]string     `json:"labels,omitempty"`
+	// Lease and activity times; omitted until first set.
+	LeasedUntil  time.Time `json:"leased_until,omitzero"`
+	LastLeasedAt time.Time `json:"last_leased_at,omitzero"`
+	LastActivity time.Time `json:"last_activity,omitzero"`
 }
 
 func toSandboxResponse(s *engine.Sandbox) sandboxResponse {
+	a := s.Activity()
 	return sandboxResponse{
-		ID:        s.ID,
-		Image:     s.Image,
-		Status:    s.GetStatus(),
-		CreatedAt: s.CreatedAt,
-		ExpiresAt: s.Expiry(),
-		Ports:     s.Ports,
+		ID:           s.ID,
+		Image:        s.Image,
+		Status:       s.GetStatus(),
+		CreatedAt:    s.CreatedAt,
+		ExpiresAt:    s.Expiry(),
+		Ports:        s.Ports,
+		Labels:       s.Config.Labels,
+		LeasedUntil:  a.LeasedUntil,
+		LastLeasedAt: a.LastLeasedAt,
+		LastActivity: a.LastActivity,
 	}
 }
 
@@ -88,6 +103,8 @@ func (h *SandboxHandler) Create(w http.ResponseWriter, r *http.Request) {
 		NetworkMode:    req.NetworkMode,
 		WritableRootfs: req.WritableRootfs,
 		HostBinds:      req.HostBinds,
+		Labels:         req.Labels,
+		State:          req.State,
 	}
 	if req.Timeout > 0 {
 		cfg.Timeout = time.Duration(req.Timeout) * time.Second
@@ -100,12 +117,15 @@ func (h *SandboxHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, verr.Error())
 			return
 		}
-		if errors.Is(err, engine.ErrLimitReached) {
-			writeError(w, http.StatusTooManyRequests, "maximum sandbox limit reached")
+		if writeAdmissionError(w, err) {
 			return
 		}
-		if errors.Is(err, engine.ErrPressureTooHigh) {
-			writeError(w, http.StatusServiceUnavailable, "host under critical memory pressure")
+		if errors.Is(err, engine.ErrRestoreKeyNotFound) {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error(), "code": "restore_key_not_found"})
+			return
+		}
+		if errors.Is(err, engine.ErrInvalidState) {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if errors.Is(err, engine.ErrHostBindRejected) {
@@ -169,6 +189,10 @@ func (h *SandboxHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "sandbox not found")
 			return
 		}
+		if errors.Is(err, engine.ErrArchiving) || errors.Is(err, engine.ErrBusy) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 		h.logger.Error("failed to destroy sandbox", "id", id, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to destroy sandbox")
 		return
@@ -182,6 +206,10 @@ func (h *SandboxHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	if err := h.engine.StopSandbox(r.Context(), id); err != nil {
 		if errors.Is(err, engine.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "sandbox not found")
+			return
+		}
+		if errors.Is(err, engine.ErrArchiving) || errors.Is(err, engine.ErrBusy) {
+			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
 		h.logger.Error("failed to stop sandbox", "id", id, "error", err)
@@ -199,9 +227,79 @@ func (h *SandboxHandler) Start(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "sandbox not found")
 			return
 		}
+		if errors.Is(err, engine.ErrArchiving) || errors.Is(err, engine.ErrBusy) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		if writeAdmissionError(w, err) {
+			return
+		}
 		h.logger.Error("failed to start sandbox", "id", id, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to start sandbox")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "running"})
+}
+
+type leaseRequest struct {
+	TTLSeconds int `json:"ttl_seconds"`
+}
+
+// maxLeaseTTL bounds one lease: a caller that dies must not pin a sandbox.
+const maxLeaseTTL = time.Hour
+
+// Lease handles POST /api/v1/sandboxes/{id}/lease. While leased, the sandbox
+// is neither archived nor reaped, whatever its traffic.
+func (h *SandboxHandler) Lease(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req leaseRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	ttl := time.Duration(req.TTLSeconds) * time.Second
+	if ttl <= 0 || ttl > maxLeaseTTL {
+		writeError(w, http.StatusBadRequest, "ttl_seconds must be between 1 and 3600")
+		return
+	}
+	until, err := h.engine.LeaseSandbox(id, ttl)
+	switch {
+	case errors.Is(err, engine.ErrNotFound):
+		writeError(w, http.StatusNotFound, "sandbox not found")
+	case errors.Is(err, engine.ErrArchiving):
+		writeError(w, http.StatusConflict, err.Error())
+	case err != nil:
+		h.logger.Error("failed to lease sandbox", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to lease sandbox")
+	default:
+		writeJSON(w, http.StatusOK, map[string]time.Time{"leased_until": until})
+	}
+}
+
+// Archive handles POST /api/v1/sandboxes/{id}/archive[?force=true]. It saves
+// the state to the sandbox's archive key and removes it; on success the
+// sandbox is gone (404 from then on). Without force, a lease or a held
+// operation answers 409.
+func (h *SandboxHandler) Archive(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	force := r.URL.Query().Get("force") == "true"
+	err := h.engine.ArchiveSandbox(r.Context(), id, force)
+	switch {
+	case errors.Is(err, engine.ErrNotFound):
+		writeError(w, http.StatusNotFound, "sandbox not found")
+	case errors.Is(err, engine.ErrArchiving), errors.Is(err, engine.ErrBusy), errors.Is(err, engine.ErrInUse), errors.Is(err, engine.ErrNoState):
+		writeError(w, http.StatusConflict, err.Error())
+	case err != nil:
+		h.logger.Error("failed to archive sandbox", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to archive sandbox")
+	default:
+		writeJSON(w, http.StatusOK, map[string]string{"status": "archived"})
+	}
+}
+
+// Drain handles POST /api/v1/drain. From now on every create, start and
+// snapshot restore answers 409; count is how many containers still exist, and
+// a host may be removed only when a drain answers count 0. Idempotent.
+func (h *SandboxHandler) Drain(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"draining": true, "count": h.engine.Drain()})
 }

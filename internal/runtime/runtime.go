@@ -29,6 +29,10 @@ const (
 	StatusRunning  SandboxStatus = "running"
 	StatusStopped  SandboxStatus = "stopped"
 	StatusError    SandboxStatus = "error"
+	// StatusArchiving is a sandbox whose state is being saved before its
+	// container is removed. It never runs again: lease, exec and a second
+	// archive are refused until the container is gone.
+	StatusArchiving SandboxStatus = "archiving"
 )
 
 // NetworkMode selects the network topology a sandbox container runs with.
@@ -141,6 +145,20 @@ type SandboxConfig struct {
 	// mounts what it is handed, so an unvalidated value must never reach it.
 	HostBinds []HostBind        `json:"host_binds,omitempty"`
 	TmpfsMap  map[string]string `json:"-"` // Computed by engine from storage config + defaults
+	// State, when set, makes the sandbox's state outlive the host: restored
+	// from RestoreKey before the container starts, archived to ArchiveKey
+	// instead of being destroyed when idle.
+	State *StateTarget `json:"state,omitempty"`
+}
+
+// StateTarget names where a sandbox's state comes from and goes to. Paths are
+// absolute directories inside the sandbox; the archive is one tar.zst of all
+// of them. ArchiveKey is unique per placement, so an upload never overwrites.
+type StateTarget struct {
+	Bucket     string   `json:"bucket"`
+	RestoreKey string   `json:"restore_key,omitempty"`
+	ArchiveKey string   `json:"archive_key"`
+	Paths      []string `json:"paths"`
 }
 
 // SandboxInfo holds runtime information about a sandbox.
@@ -160,6 +178,8 @@ type SandboxInfo struct {
 	// sandbox has no network endpoint (network_mode=none) or on hosts where
 	// the bridge is not host-routable (e.g. Docker Desktop on macOS).
 	IP string `json:"ip,omitempty"`
+	// Paused is a container Docker reports paused (its Status reads stopped).
+	Paused bool `json:"paused,omitempty"`
 }
 
 // ExecOpts configures command execution inside a sandbox.
@@ -236,6 +256,9 @@ type Runtime interface {
 	Create(ctx context.Context, id string, cfg SandboxConfig) error
 	Start(ctx context.Context, id string) error
 	Stop(ctx context.Context, id string, timeout time.Duration) error
+	// Pause freezes every process, so a copy of the filesystem is consistent.
+	Pause(ctx context.Context, id string) error
+	Unpause(ctx context.Context, id string) error
 	Remove(ctx context.Context, id string) error
 	Info(ctx context.Context, id string) (*SandboxInfo, error)
 	List(ctx context.Context) ([]SandboxInfo, error)
@@ -251,6 +274,12 @@ type Runtime interface {
 	Stat(ctx context.Context, id string, path string) (*FileInfo, error)
 	MkDir(ctx context.Context, id string, path string) error
 	RemoveFile(ctx context.Context, id string, path string) error
+	// CopyFrom returns path as a tar stream (Docker's copy-from-container). It
+	// works on a stopped container too.
+	CopyFrom(ctx context.Context, id string, path string) (io.ReadCloser, error)
+	// CopyTo extracts a tar stream into dir. It works before the container
+	// starts, which is how saved state is put back before anything runs.
+	CopyTo(ctx context.Context, id string, dir string, content io.Reader) error
 
 	// Snapshots
 	Snapshot(ctx context.Context, id string, name string) (*SnapshotInfo, error)

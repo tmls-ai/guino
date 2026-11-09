@@ -58,7 +58,7 @@ var (
 // iptables; only the bridge lookup, which needs a daemon, is skipped.
 func applyRules(t *testing.T, rec *recorder) error {
 	t.Helper()
-	rules, err := netpolicy.EgressRules(netpolicy.EgressDesktop, testBridge, "", 8080)
+	rules, err := netpolicy.EgressRules(netpolicy.EgressDesktop, testBridge, nil)
 	if err != nil {
 		t.Fatalf("building rules: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestRealFailureRefusesStartup(t *testing.T) {
 // The open profile is the default and must touch nothing at all, including on a
 // machine with no iptables, which is every developer's Mac.
 func TestOpenProfileRunsNoCommands(t *testing.T) {
-	rules, err := netpolicy.EgressRules(netpolicy.EgressOpen, testBridge, "", 8080)
+	rules, err := netpolicy.EgressRules(netpolicy.EgressOpen, testBridge, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

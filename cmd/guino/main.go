@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	goruntime "runtime"
 	"syscall"
 	"time"
@@ -130,6 +131,8 @@ func serveCmd() *cobra.Command {
 				docker.WithNetworkMode(runtime.NetworkMode(cfg.Runtime.DefaultNetworkMode)),
 				docker.WithReconcileNetwork(cfg.Runtime.ReconcileNetwork),
 				docker.WithAllowUnsafeBridge(cfg.Runtime.AllowUnsafeBridge),
+				docker.WithOCIRuntime(cfg.Runtime.OCIRuntime),
+				docker.WithDNS(cfg.Runtime.SandboxDNS, sandboxResolvConfPath(cfg)),
 				docker.WithLogger(logger),
 			)
 			if err != nil {
@@ -163,6 +166,7 @@ func serveCmd() *cobra.Command {
 			protectProcess(logger)
 
 			// Setup engine
+			cfg.Sandbox.State.TempDir = filepath.Join(filepath.Dir(cfg.Store.Path), "state-tmp")
 			eng := engine.NewEngine(rt, st, cfg.Sandbox, cfg.S3, cfg.Resource,
 				netpolicy.Policy{
 					DefaultMode:      runtime.NetworkMode(cfg.Runtime.DefaultNetworkMode),
@@ -224,4 +228,14 @@ func versionCmd() *cobra.Command {
 			fmt.Printf("guino %s (commit: %s, built: %s)\n", version, commit, buildDate)
 		},
 	}
+}
+
+// sandboxResolvConfPath is where runtime.sandbox_dns is written for sandboxes
+// to mount: next to the store, the one directory Guino already keeps.
+func sandboxResolvConfPath(cfg *config.Config) string {
+	p, err := filepath.Abs(filepath.Join(filepath.Dir(cfg.Store.Path), "guino-resolv.conf"))
+	if err != nil {
+		return filepath.Join(filepath.Dir(cfg.Store.Path), "guino-resolv.conf")
+	}
+	return p
 }

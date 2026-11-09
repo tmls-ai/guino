@@ -67,6 +67,9 @@ func (h *SnapshotHandler) Restore(w http.ResponseWriter, r *http.Request) {
 
 	sandbox, err := h.engine.RestoreSnapshot(r.Context(), snapshotID)
 	if err != nil {
+		if writeAdmissionError(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

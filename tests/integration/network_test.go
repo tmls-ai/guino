@@ -80,6 +80,11 @@ func newNetEngine(t *testing.T, mode runtime.NetworkMode) *engine.Engine {
 		netpolicy.Policy{DefaultMode: mode}, logger)
 
 	t.Cleanup(func() {
+		// Shutdown leaves containers running (a restart restores them), so a
+		// test removes its own.
+		for _, sb := range eng.ListSandboxes() {
+			_ = eng.DestroySandbox(context.Background(), sb.ID)
+		}
 		eng.Shutdown(context.Background())
 		// Force-remove the unique network even if a container lingered.
 		_ = exec.Command("docker", "network", "rm", netName).Run()

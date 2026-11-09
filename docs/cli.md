@@ -21,7 +21,7 @@ guino serve --config guino.yaml
 
 Start the REST/WebSocket API and embedded dashboard. The command validates config, connects to Docker, applies network guards, reconciles persisted resources and starts the engine. The unconfigured `0.0.0.0`/auth-off/`internal` combination is refused; follow the [quickstart](docs/quick-start.md) for a working local configuration.
 
-Graceful shutdown destroys running sandboxes. Persistent Docker volumes and image snapshots have separate lifecycles. Only one process may manage a database and its Docker resources.
+Graceful shutdown destroys running sandboxes, except those created with a `state` target: they keep running and the next start restores them (config, labels, ports, lease). Persistent Docker volumes and image snapshots have separate lifecycles. Only one process may manage a database and its Docker resources.
 
 ## guino create
 

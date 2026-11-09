@@ -85,6 +85,16 @@ type RuntimeConfig struct {
 	// co-residency attestation that unlocks the bind guard's loopback branch.
 	// Any other non-empty value is a config error.
 	PlatformOverride string `koanf:"platform_override"`
+	// OCIRuntime is the Docker runtime sandboxes run under, for example
+	// "runsc" (gVisor). Empty uses the daemon default (runc). A runsc used for
+	// archived state must run with --overlay2=none, or Docker cannot read what
+	// the sandbox wrote.
+	OCIRuntime string `koanf:"oci_runtime"`
+	// SandboxDNS are the DNS servers every sandbox uses (IPv4). Empty keeps
+	// Docker's default. With egress_profile "desktop" exactly these get the
+	// port 53 exemption instead of the default gateway (on AWS the resolver
+	// is the VPC base +2, not the gateway).
+	SandboxDNS []string `koanf:"sandbox_dns"`
 }
 
 // TmpfsDefault defines a default tmpfs mount.
@@ -114,10 +124,26 @@ type SandboxConfig struct {
 	HostBindRoots        []HostBindRoot `koanf:"host_bind_roots"`
 	MaxVolumesPerSandbox int            `koanf:"max_volumes_per_sandbox"`
 	DefaultTmpfs         []TmpfsDefault `koanf:"default_tmpfs"`
+	// State is where sandbox state archives may go (sandbox.state.*). Unset
+	// bucket refuses every create that asks for state.
+	State StateConfig `koanf:"state"`
 }
 
 // HostBindRoot is a host directory sandboxes may bind from. Mirrors
 // netpolicy.HostBindRoot field for field (config stays an import leaf).
+// StateConfig bounds sandbox state archives. The bucket and key prefix are the
+// server's, not the caller's: a request may only name keys under the prefix.
+type StateConfig struct {
+	Bucket    string `koanf:"bucket"`
+	KeyPrefix string `koanf:"key_prefix"`
+	// MaxBytes caps the sum of file sizes in one archive and the compressed
+	// size read on restore.
+	MaxBytes int64 `koanf:"max_bytes"`
+	// TempDir holds archives while they upload. Set by the server next to
+	// the store (never /tmp, which is RAM on some hosts); not a config key.
+	TempDir string `koanf:"-"`
+}
+
 type HostBindRoot struct {
 	Path     string `koanf:"path"`
 	ReadOnly bool   `koanf:"read_only"`
@@ -208,6 +234,7 @@ func DefaultConfig() *Config {
 			AllowS3FUSE:          false,
 			AllowHostBinds:       false,
 			MaxVolumesPerSandbox: 5,
+			State:                StateConfig{MaxBytes: 2 << 30},
 			DefaultTmpfs: []TmpfsDefault{
 				{Path: "/tmp", Size: "256m"},
 				{Path: "/home/sandbox", Size: "512m"},
@@ -294,12 +321,29 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid runtime.default_network_mode %q: must be internal, bridge, or none", c.Runtime.DefaultNetworkMode)
 	}
 
+	for _, ip := range c.Runtime.SandboxDNS {
+		if parsed := net.ParseIP(ip); parsed == nil || parsed.To4() == nil {
+			return fmt.Errorf("invalid runtime.sandbox_dns entry %q: must be an IPv4 address", ip)
+		}
+	}
+
 	// Egress profile enum. "" is accepted and treated as "open".
 	switch c.Runtime.EgressProfile {
 	case "", "open", "desktop":
 		// ok
 	default:
 		return fmt.Errorf("invalid runtime.egress_profile %q: must be open or desktop", c.Runtime.EgressProfile)
+	}
+	// A state host or a gVisor host is a multi-tenant sandbox host: it must not
+	// start without the egress rules that keep sandboxes off the host and VPC.
+	if (c.Sandbox.State.Bucket != "" || c.Runtime.OCIRuntime != "") && c.Runtime.EgressProfile != "desktop" {
+		return fmt.Errorf("sandbox.state.bucket and runtime.oci_runtime require runtime.egress_profile \"desktop\"")
+	}
+	if p := c.Sandbox.State.KeyPrefix; strings.HasPrefix(p, "/") || strings.Contains(p, "..") || strings.Contains(p, `\`) {
+		return fmt.Errorf("invalid sandbox.state.key_prefix %q", p)
+	}
+	if c.Sandbox.State.MaxBytes < 0 {
+		return fmt.Errorf("sandbox.state.max_bytes must be non-negative")
 	}
 	if c.Server.RateLimitProxyRPS < 0 || c.Server.RateLimitProxyBurst < 0 {
 		return fmt.Errorf("rate_limit_proxy_rps and rate_limit_proxy_burst must be non-negative")
