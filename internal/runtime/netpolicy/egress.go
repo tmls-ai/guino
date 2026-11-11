@@ -226,18 +226,36 @@ var ifaceName = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`)
 // lost. Matching on what is allowed also covers VLAN-tagged and other
 // ethertypes. The leading add-then-delete makes the whole replacement one
 // transaction, so re-running it is idempotent and never leaves a gap.
+//
+// `meta ibrname` needs the kernel's nft_meta_bridge module, which some
+// kernels do not build (Amazon Linux 2023: CONFIG_NFT_BRIDGE_META unset); nft
+// then answers "Operation not supported" and BridgeIsolationNftPorts is the
+// fallback.
 func BridgeIsolationNft(bridge string) (string, error) {
 	if !ifaceName.MatchString(bridge) {
 		return "", fmt.Errorf("bridge interface name %q is not a plain interface name", bridge)
 	}
+	return bridgeIsolationTable(`meta ibrname "` + bridge + `"`), nil
+}
+
+// BridgeIsolationNftPorts is BridgeIsolationNft for kernels without
+// nft_meta_bridge. In the bridge forward hook iifname and oifname are the
+// ports (core nft_meta, always built), so it matches frames between any two
+// veth ports on any bridge of the host, not only Guino's: other containers on
+// the same host lose non-IPv4 traffic between each other too.
+func BridgeIsolationNftPorts() string {
+	return bridgeIsolationTable(`iifname "veth*" oifname "veth*"`)
+}
+
+func bridgeIsolationTable(match string) string {
 	return "table bridge " + bridgeTable + "\n" +
 		"delete table bridge " + bridgeTable + "\n" +
 		"table bridge " + bridgeTable + " {\n" +
 		"\tchain forward {\n" +
 		"\t\ttype filter hook forward priority 0; policy accept;\n" +
-		"\t\tmeta ibrname \"" + bridge + "\" meta protocol != { ip, arp } drop\n" +
+		"\t\t" + match + " meta protocol != { ip, arp } drop\n" +
 		"\t}\n" +
-		"}\n", nil
+		"}\n"
 }
 
 // EgressChainName exposes Guino's forward-path chain for tests and for operators

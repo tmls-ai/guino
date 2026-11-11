@@ -185,7 +185,12 @@ func installEgressRules(ctx context.Context, rules [][]string, bridge string, ru
 	if err != nil {
 		return refuse("nft", err)
 	}
-	if _, err := run(ctx, isolation, "nft", "-f", "-"); errors.Is(err, exec.ErrNotFound) {
+	_, err = run(ctx, isolation, "nft", "-f", "-")
+	if nftUnsupported(err) {
+		logger.Warn("the kernel lacks nft_meta_bridge: sandbox isolation drops non-IPv4 frames between any two veth ports on any bridge of this host, not only "+bridge, "error", err)
+		_, err = run(ctx, netpolicy.BridgeIsolationNftPorts(), "nft", "-f", "-")
+	}
+	if errors.Is(err, exec.ErrNotFound) {
 		// ponytail: a single-user desktop VM may lack nft; a host shared by
 		// several tenants must have it (the fleet AMI does).
 		logger.Error("nft is not installed: sandboxes on this host are NOT isolated from each other over IPv6; install nftables on any host shared by more than one user", "bridge", bridge)
@@ -193,6 +198,12 @@ func installEgressRules(ctx context.Context, rules [][]string, bridge string, ru
 		return refuse("nft", err)
 	}
 	return nil
+}
+
+// nftUnsupported reports whether nft refused a ruleset because the kernel
+// lacks a module it needs (nft_meta_bridge for `meta ibrname`).
+func nftUnsupported(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Operation not supported")
 }
 
 // hookFirst makes `hook` (built-in chain, then rule) the first rule of its

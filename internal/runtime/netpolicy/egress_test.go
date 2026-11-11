@@ -313,3 +313,21 @@ func TestBridgeIsolationDropsNonIPv4BetweenPorts(t *testing.T) {
 		}
 	}
 }
+
+// The fallback for kernels without nft_meta_bridge matches the ports by name
+// and keeps the same idempotent table.
+func TestBridgeIsolationPortsFallback(t *testing.T) {
+	got := BridgeIsolationNftPorts()
+	for _, want := range []string{
+		"table bridge guino\ndelete table bridge guino\ntable bridge guino {",
+		"type filter hook forward priority 0; policy accept;",
+		`iifname "veth*" oifname "veth*" meta protocol != { ip, arp } drop`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("ruleset lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "ibrname") {
+		t.Errorf("the fallback must not need nft_meta_bridge:\n%s", got)
+	}
+}
