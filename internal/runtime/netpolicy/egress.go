@@ -2,6 +2,7 @@ package netpolicy
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -205,6 +206,38 @@ func EgressHooks(bridge string) [][]string {
 		{DockerUserChain, "-j", denChain},
 		{"INPUT", "-i", bridge, "-j", hostChain},
 	}
+}
+
+// bridgeTable is Guino's nftables table in the bridge family.
+const bridgeTable = "guino"
+
+// ifaceName is what a Linux interface name may look like here; anything else
+// is refused rather than quoted into a ruleset.
+var ifaceName = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`)
+
+// BridgeIsolationNft returns the `nft -f -` input that drops every frame the
+// bridge would switch between two of its ports unless it is IPv4 or ARP.
+//
+// ICC off and the forward rules are IPv4 only, and turning IPv6 off on the
+// bridge only silences the host's own stack: the bridge still switches IPv6
+// frames between ports, so two sandboxes could talk over link-local IPv6.
+// The bridge family's forward hook sees exactly port-to-port frames (frames to
+// the host take the input hook), so nothing a sandbox legitimately sends is
+// lost. Matching on what is allowed also covers VLAN-tagged and other
+// ethertypes. The leading add-then-delete makes the whole replacement one
+// transaction, so re-running it is idempotent and never leaves a gap.
+func BridgeIsolationNft(bridge string) (string, error) {
+	if !ifaceName.MatchString(bridge) {
+		return "", fmt.Errorf("bridge interface name %q is not a plain interface name", bridge)
+	}
+	return "table bridge " + bridgeTable + "\n" +
+		"delete table bridge " + bridgeTable + "\n" +
+		"table bridge " + bridgeTable + " {\n" +
+		"\tchain forward {\n" +
+		"\t\ttype filter hook forward priority 0; policy accept;\n" +
+		"\t\tmeta ibrname \"" + bridge + "\" meta protocol != { ip, arp } drop\n" +
+		"\t}\n" +
+		"}\n", nil
 }
 
 // EgressChainName exposes Guino's forward-path chain for tests and for operators

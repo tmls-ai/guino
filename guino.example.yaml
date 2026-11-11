@@ -99,7 +99,9 @@ sandbox:
   allow_shared_volumes: true
   allow_s3: true
   allow_s3_fuse: false          # Requires SYS_ADMIN capability
-  # Host binds need auth.enabled and a loopback server.host. A request may only
+  # Host binds need auth.enabled and either a loopback server.host or
+  # runtime.egress_profile "desktop" (which drops every new connection from
+  # sandboxes to the host). A request may only
   # mount paths inside these roots (after resolving symlinks), never wider.
   allow_host_binds: false
   host_bind_roots: []           # e.g. [{path: "/home/me/shared", read_only: true}]

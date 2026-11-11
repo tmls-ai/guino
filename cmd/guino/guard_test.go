@@ -121,6 +121,27 @@ func TestApplyNetworkGuards_BindGuardIsNoOpInMCP(t *testing.T) {
 		"the bind guard must be a no-op in MCP stdio mode")
 }
 
+// The call site must pass the configured egress profile: a fleet host listens
+// on its private address with auth and the desktop profile, and binds the
+// project workspaces from the host.
+func TestHostBindGuard_NonLoopbackNeedsAuthAndDesktopProfile(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Sandbox.AllowHostBinds = true
+	cfg.Sandbox.HostBindRoots = []config.HostBindRoot{{Path: t.TempDir()}}
+	cfg.Server.Host = "0.0.0.0"
+
+	cfg.Auth.Enabled = false
+	cfg.Runtime.EgressProfile = "desktop"
+	require.ErrorContains(t, hostBindGuard(cfg, quietLogger(), true), "allow_host_binds", "no auth refuses")
+
+	cfg.Auth.Enabled = true
+	cfg.Runtime.EgressProfile = "open"
+	require.ErrorContains(t, hostBindGuard(cfg, quietLogger(), true), "allow_host_binds", "open egress on 0.0.0.0 refuses")
+
+	cfg.Runtime.EgressProfile = "desktop"
+	require.NoError(t, hostBindGuard(cfg, quietLogger(), true), "auth plus desktop starts")
+}
+
 // --- MCP is stdio-only: structural no-network-listener invariant -------------
 //
 // mcp.go must never open a network listener. This is enforced structurally

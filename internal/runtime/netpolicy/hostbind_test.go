@@ -177,25 +177,34 @@ func TestDangerousRootsAreRefusedAtStartup(t *testing.T) {
 	}
 }
 
-// Host binds are the strongest capability Guino grants, so they need the same
-// posture the bind guard demands: authenticated, on loopback.
-func TestHostBindsRequireAnAuthenticatedLoopbackControlPlane(t *testing.T) {
+// Host binds are the strongest capability Guino grants, so they need an
+// authenticated control plane that sandboxes cannot reach: on loopback, or on
+// any address under the desktop egress profile, which drops every new
+// connection from the bridge to the host.
+func TestHostBindsRequireAnAuthenticatedUnreachableControlPlane(t *testing.T) {
 	cases := []struct {
-		auth bool
-		host string
-		want bool
+		auth    bool
+		host    string
+		profile EgressProfile
+		want    bool
 	}{
-		{true, "127.0.0.1", true},
-		{true, "0.0.0.0", false},
-		{false, "127.0.0.1", false},
-		{false, "0.0.0.0", false},
+		{true, "127.0.0.1", EgressOpen, true},
+		{true, "127.0.0.1", "", true},
+		{true, "0.0.0.0", EgressOpen, false},
+		{true, "0.0.0.0", "", false},
+		{true, "0.0.0.0", EgressDesktop, true},
+		{true, "10.40.1.7", EgressDesktop, true},
+		{false, "127.0.0.1", EgressOpen, false},
+		{false, "0.0.0.0", EgressOpen, false},
+		{false, "0.0.0.0", EgressDesktop, false},
+		{false, "127.0.0.1", EgressDesktop, false},
 	}
 	for _, c := range cases {
-		if got := HostBindsAllowed(c.auth, c.host); got != c.want {
-			t.Errorf("HostBindsAllowed(auth=%v, host=%q) = %v, want %v", c.auth, c.host, got, c.want)
+		if got := HostBindsAllowed(c.auth, c.host, c.profile); got != c.want {
+			t.Errorf("HostBindsAllowed(auth=%v, host=%q, profile=%q) = %v, want %v", c.auth, c.host, c.profile, got, c.want)
 		}
 	}
-	for _, want := range []string{"allow_host_binds", "auth.enabled", "127.0.0.1"} {
+	for _, want := range []string{"allow_host_binds", "auth.enabled", "127.0.0.1", `egress_profile="desktop"`} {
 		if !strings.Contains(MsgHostBindsUnsafe, want) {
 			t.Errorf("the refusal message does not mention %q", want)
 		}

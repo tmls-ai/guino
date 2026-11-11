@@ -3,7 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -21,12 +25,16 @@ type recorder struct {
 	failOn  []string
 	listing map[string]string
 	later   map[string][]string
+	missing string // a binary that is not installed
 }
 
 func (r *recorder) run(_ context.Context, stdin, name string, args ...string) (string, error) {
 	line := name + " " + strings.Join(args, " ")
 	r.calls = append(r.calls, line)
 	r.stdin = append(r.stdin, stdin)
+	if name == r.missing {
+		return "", fmt.Errorf("%s: %w", name, exec.ErrNotFound)
+	}
 	for _, f := range r.failOn {
 		if strings.Contains(line, f) {
 			return "", errors.New("iptables: failed")
@@ -78,8 +86,13 @@ func TestInstallRestoresThenHooks(t *testing.T) {
 	if !strings.Contains(rec.stdin[0], "-d 169.254.0.0/16 -j DROP") || !strings.HasSuffix(rec.stdin[0], "COMMIT\n") {
 		t.Errorf("restore input is not the ruleset:\n%s", rec.stdin[0])
 	}
-	// Already first in both chains: only listed, never touched.
-	for _, c := range rec.calls[1:] {
+	// Already first in both chains: only listed, never touched. The bridge
+	// isolation table is replaced last.
+	last := len(rec.calls) - 1
+	if rec.calls[last] != "nft -f -" || !strings.Contains(rec.stdin[last], "meta protocol != { ip, arp } drop") {
+		t.Errorf("bridge isolation not installed last: %q\n%s", rec.calls[last], rec.stdin[last])
+	}
+	for _, c := range rec.calls[1:last] {
 		if !strings.HasPrefix(c, "iptables -S ") {
 			t.Errorf("a jump already in place must be left alone, got %q", c)
 		}
@@ -144,6 +157,7 @@ func TestRealFailureRefusesStartup(t *testing.T) {
 		{"iptables -S " + netpolicy.DockerUserChain},
 		{"iptables -I " + netpolicy.DockerUserChain},
 		{"iptables -I INPUT"},
+		{"nft -f -"},
 	} {
 		rec := &recorder{failOn: failing}
 		err := applyRules(t, rec)
@@ -166,5 +180,44 @@ func TestOpenProfileRunsNoCommands(t *testing.T) {
 	}
 	if len(rules) != 0 {
 		t.Fatalf("the open profile would have run %d commands", len(rules))
+	}
+}
+
+// The rules are IPv4 only, so the profile turns IPv6 off on the bridge: a
+// dual-stack API must not be reachable over the bridge's link-local address.
+func TestDesktopProfileDisablesIPv6OnTheBridge(t *testing.T) {
+	conf := t.TempDir()
+	sw := filepath.Join(conf, testBridge, "disable_ipv6")
+	if err := os.MkdirAll(filepath.Dir(sw), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sw, []byte("0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := disableBridgeIPv6(conf, testBridge); err != nil {
+		t.Fatalf("disabling IPv6: %v", err)
+	}
+	if got, _ := os.ReadFile(sw); strings.TrimSpace(string(got)) != "1" {
+		t.Fatalf("disable_ipv6 = %q, want 1", got)
+	}
+
+	// A kernel without IPv6 has nothing to turn off.
+	if err := disableBridgeIPv6(filepath.Join(conf, "absent"), testBridge); err != nil {
+		t.Fatalf("no IPv6 in the kernel must not refuse: %v", err)
+	}
+	// IPv6 present but the switch cannot be set: refuse.
+	if err := disableBridgeIPv6(conf, "br-missing"); err == nil {
+		t.Fatal("a bridge whose IPv6 could not be turned off must refuse")
+	}
+}
+
+// A desktop VM without nft keeps starting (with a loud log); nft that is
+// present but rejects the ruleset still refuses.
+func TestMissingNftWarnsButFailingNftRefuses(t *testing.T) {
+	if err := applyRules(t, &recorder{listing: hooked, missing: "nft"}); err != nil {
+		t.Fatalf("a host without nft must still start: %v", err)
+	}
+	if err := applyRules(t, &recorder{listing: hooked, failOn: []string{"nft -f -"}}); err == nil {
+		t.Fatal("nft that fails to load the ruleset must refuse")
 	}
 }

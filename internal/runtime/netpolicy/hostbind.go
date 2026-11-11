@@ -53,9 +53,10 @@ type ResolvedHostBind struct {
 // MsgHostBindsUnsafe is emitted (and the process exits non-zero) when host binds
 // are enabled in a posture where they would be reachable by anything that can
 // speak to the control plane.
-const MsgHostBindsUnsafe = "guino refuses to start: sandbox.allow_host_binds=true requires an authenticated control plane on loopback. " +
+const MsgHostBindsUnsafe = "guino refuses to start: sandbox.allow_host_binds=true requires an authenticated control plane that sandboxes cannot reach. " +
 	"A host bind is the strongest capability guino grants — anything that can call the API can ask for a directory of the host filesystem. " +
-	"Remediations: set auth.enabled=true with api_keys, and bind server.host to 127.0.0.1; or set sandbox.allow_host_binds=false"
+	"Remediations: set auth.enabled=true with api_keys, and either bind server.host to 127.0.0.1 or set runtime.egress_profile=\"desktop\" " +
+	"(it closes the bridge-to-host path; the host's public address and other hosts stay the job of your firewall); or set sandbox.allow_host_binds=false"
 
 // pathResolver turns a path into its real, symlink-free absolute form.
 // filepath.EvalSymlinks in production; a map in tests.
@@ -238,8 +239,16 @@ func ValidateHostBindRoots(roots []HostBindRoot, resolve pathResolver) error {
 // HostBindsAllowed reports whether the posture is safe enough to enable them.
 //
 // Same shape as the bind guard: a host bind is the strongest capability Guino
-// grants, so it requires both authentication and a loopback control plane.
-// Without auth, anything that reaches the port can ask for a host directory.
-func HostBindsAllowed(authEnabled bool, serverHost string) bool {
-	return authEnabled && ClassifyHost(serverHost) == HostLoopback
+// grants, so it requires authentication and a control plane sandboxes cannot
+// reach. Without auth, anything that reaches the port can ask for a host
+// directory. A loopback listener is out of a sandbox's reach; so is any
+// listener under the desktop egress profile, which closes the bridge-to-host
+// path (an INPUT drop for the bridge, and IPv6 off on it), so a fleet host can
+// listen on its private address for its controller. What the profile does not
+// cover is the operator's: the host's public address and other hosts' APIs are
+// reached through the forward path, where only the blocked private ranges are
+// dropped, so a VPC outside them (AWS allows non-RFC1918 CIDRs) and any public
+// address need a firewall such as a security group.
+func HostBindsAllowed(authEnabled bool, serverHost string, profile EgressProfile) bool {
+	return authEnabled && (ClassifyHost(serverHost) == HostLoopback || profile == EgressDesktop)
 }

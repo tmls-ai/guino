@@ -118,9 +118,9 @@ func hostBindGuard(cfg *config.Config, logger *slog.Logger, httpListener bool) e
 	if !cfg.Sandbox.AllowHostBinds {
 		return nil
 	}
-	if httpListener && !netpolicy.HostBindsAllowed(cfg.Auth.Enabled, cfg.Server.Host) {
+	if httpListener && !netpolicy.HostBindsAllowed(cfg.Auth.Enabled, cfg.Server.Host, netpolicy.EgressProfile(cfg.Runtime.EgressProfile)) {
 		logger.Error(netpolicy.MsgHostBindsUnsafe,
-			"auth_enabled", cfg.Auth.Enabled, "server_host", cfg.Server.Host)
+			"auth_enabled", cfg.Auth.Enabled, "server_host", cfg.Server.Host, "egress_profile", cfg.Runtime.EgressProfile)
 		return errors.New(netpolicy.MsgHostBindsUnsafe)
 	}
 	// A catastrophic root is a refusal to start, not a surprise at first bind.

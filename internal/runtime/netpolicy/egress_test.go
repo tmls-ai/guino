@@ -288,3 +288,28 @@ func TestConfiguredResolversAreEachExemptedForDNSOnly(t *testing.T) {
 		t.Fatalf("exemptions:\n%s\nwant:\n%s", strings.Join(exempt, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// Sandboxes on one bridge must not reach each other over IPv6 (ICC off is IPv4
+// only): the bridge forward hook drops every port-to-port frame that is not
+// IPv4 or ARP, and the table is replaced in one transaction. The real check is
+// T12 on a Linux host.
+func TestBridgeIsolationDropsNonIPv4BetweenPorts(t *testing.T) {
+	got, err := BridgeIsolationNft("br-guino")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"table bridge guino\ndelete table bridge guino\ntable bridge guino {",
+		"type filter hook forward priority 0; policy accept;",
+		`meta ibrname "br-guino" meta protocol != { ip, arp } drop`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("ruleset lacks %q:\n%s", want, got)
+		}
+	}
+	for _, bad := range []string{"", `br" accept; #`, "br guino", "a-very-long-bridge-name"} {
+		if _, err := BridgeIsolationNft(bad); err == nil {
+			t.Errorf("bridge name %q was accepted", bad)
+		}
+	}
+}
