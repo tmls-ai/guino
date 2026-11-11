@@ -221,3 +221,47 @@ func TestMissingNftWarnsButFailingNftRefuses(t *testing.T) {
 		t.Fatal("nft that fails to load the ruleset must refuse")
 	}
 }
+
+// On a kernel without nft_meta_bridge the ibrname rule answers "Operation not
+// supported": the port-name rule goes in instead. Any other nft error, and a
+// fallback that fails too, still refuse.
+func TestBridgeIsolationFallsBackWithoutMetaBridge(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+	rules, err := netpolicy.EgressRules(netpolicy.EgressDesktop, testBridge, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	install := func(failIbrname, failPorts string) (*recorder, error) {
+		rec := &recorder{listing: hooked}
+		run := func(ctx context.Context, stdin, name string, args ...string) (string, error) {
+			out, err := rec.run(ctx, stdin, name, args...)
+			if name == "nft" && strings.Contains(stdin, "ibrname") && failIbrname != "" {
+				return "", errors.New("nft -f -: exit status 1: Error: Could not process rule: " + failIbrname)
+			}
+			if name == "nft" && strings.Contains(stdin, `iifname "veth*"`) && failPorts != "" {
+				return "", errors.New("nft -f -: exit status 1: Error: " + failPorts)
+			}
+			return out, err
+		}
+		return rec, installEgressRules(context.Background(), rules, testBridge, run, logger)
+	}
+
+	rec, err := install("Operation not supported", "")
+	if err != nil {
+		t.Fatalf("the port-name fallback must start: %v", err)
+	}
+	last := len(rec.stdin) - 1
+	if rec.calls[last] != "nft -f -" || !strings.Contains(rec.stdin[last], `iifname "veth*" oifname "veth*"`) {
+		t.Fatalf("fallback not installed last: %q\n%s", rec.calls[last], rec.stdin[last])
+	}
+
+	if _, err := install("No such file or directory", ""); err == nil {
+		t.Fatal("an nft error other than unsupported must refuse, not fall back")
+	}
+	if _, err := install("Operation not supported", "syntax error"); err == nil {
+		t.Fatal("a failing fallback must refuse")
+	}
+	if rec, err := install("", ""); err != nil || strings.Contains(strings.Join(rec.stdin, ""), `iifname "veth*"`) {
+		t.Fatalf("with nft_meta_bridge the ibrname rule alone must go in: %v", err)
+	}
+}
