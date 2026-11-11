@@ -258,7 +258,7 @@ Errors: `404` gone, `409` archiving.
 POST /api/v1/sandboxes/{id}/archive[?force=true]
 ```
 
-Writes the state `paths` as one tar.zst to `archive_key` (with `If-None-Match: *`; an existing object counts as success) and removes the container. Afterwards the sandbox is gone (`404`). The idle reaper does the same for a sandbox with `state`, instead of destroying it. Without `force`, a live lease or a held operation (exec, proxied WebSocket) answers `409`.
+Writes the state `paths` as one tar.zst to `archive_key` (with `If-None-Match: *`; an existing object counts as success) and removes the container. Afterwards the sandbox is gone (`404`). The idle reaper does the same for a sandbox with `state`, instead of destroying it. A live lease answers `409`, with or without `force`; a held operation (exec, proxied WebSocket) answers `409` only without `force`.
 
 If the upload fails the container stays, the sandbox is running again and the call answers `500`. Once the upload has succeeded the sandbox stays `archiving` (lease, exec and archive answer `409`) until its container is removed; a failed remove is retried by the reaper and after a restart.
 

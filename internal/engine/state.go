@@ -244,8 +244,8 @@ func (e *Engine) LeaseSandbox(id string, ttl time.Duration) (time.Time, error) {
 }
 
 // ArchiveSandbox saves the state paths to the archive key and removes the
-// sandbox. The API and the idle reaper share this path. Unless forced, a live
-// lease or a held operation refuses with ErrInUse.
+// sandbox. The API and the idle reaper share this path. A live lease refuses
+// with ErrInUse, forced or not; a held operation refuses unless forced.
 //
 // If the upload fails, the container is unpaused and the sandbox is running
 // again. Once the archive began it is persisted as archiving, so after a crash

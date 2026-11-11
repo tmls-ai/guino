@@ -359,6 +359,41 @@ func TestHeldOperationBlocksArchiveUnlessForced(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNotFound)
 }
 
+// A live lease is a run's promise that it still uses the sandbox: force never
+// overrides it, so a controller's lifetime archive cannot cut a run short.
+func TestForcedArchiveNeverTakesALiveLease(t *testing.T) {
+	env := newStateEnv(t, 5)
+	ctx := context.Background()
+	sb, err := env.eng.CreateSandbox(ctx, stateCfg("p1/gen-1.tar.zst"))
+	require.NoError(t, err)
+	_, err = env.eng.LeaseSandbox(sb.ID, time.Minute)
+	require.NoError(t, err)
+
+	assert.ErrorIs(t, env.eng.ArchiveSandbox(ctx, sb.ID, true), ErrInUse)
+	assert.Equal(t, runtime.StatusRunning, sb.GetStatus())
+	assert.False(t, env.mock.Removed[sb.ID])
+	_, ok := env.s3.object("machines/p1/gen-1.tar.zst")
+	assert.False(t, ok, "nothing is uploaded for a refused archive")
+}
+
+// Force still skips a held operation (an open proxied socket) once the lease
+// has passed.
+func TestForcedArchiveSkipsHeldOnceTheLeaseExpired(t *testing.T) {
+	env := newStateEnv(t, 5)
+	ctx := context.Background()
+	sb, err := env.eng.CreateSandbox(ctx, stateCfg("p1/gen-1.tar.zst"))
+	require.NoError(t, err)
+	_, err = env.eng.LeaseSandbox(sb.ID, time.Minute)
+	require.NoError(t, err)
+	expireLease(sb)
+	release := sb.Hold()
+	defer release()
+
+	assert.ErrorIs(t, env.eng.ArchiveSandbox(ctx, sb.ID, false), ErrInUse)
+	require.NoError(t, env.eng.ArchiveSandbox(ctx, sb.ID, true))
+	assert.True(t, env.mock.Removed[sb.ID])
+}
+
 // A failed upload leaves the container and a running sandbox, so the next
 // attempt (the reaper's) can succeed.
 func TestArchiveUploadFailureKeepsTheSandbox(t *testing.T) {
@@ -380,6 +415,7 @@ func TestArchiveUploadFailureKeepsTheSandbox(t *testing.T) {
 	require.NoError(t, err)
 
 	env.s3.set(func(f *fakeS3) { f.putStatus = 0 })
+	expireLease(sb)
 	require.NoError(t, env.eng.ArchiveSandbox(ctx, sb.ID, true))
 	assert.True(t, env.mock.Removed[sb.ID])
 }
@@ -556,6 +592,13 @@ func TestHostStatsReportsLabelsAndLease(t *testing.T) {
 func (e *Engine) reapNow() {
 	e.reapExpired()
 	e.inflight.Wait()
+}
+
+// expireLease moves a sandbox's lease into the past, as if its ttl ran out.
+func expireLease(sb *Sandbox) {
+	sb.mu.Lock()
+	sb.leasedUntil = time.Now().Add(-time.Second)
+	sb.mu.Unlock()
 }
 
 // clearBackoff makes a sandbox due again at once, as if its backoff passed.

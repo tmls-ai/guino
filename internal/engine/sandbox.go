@@ -139,17 +139,19 @@ func (s *Sandbox) Lease(ttl time.Duration) (time.Time, error) {
 	return s.leasedUntil, nil
 }
 
-// beginArchive checks for a live lease and held operations (unless forced)
-// and moves to archiving in one step under the lock, which is what makes a
-// lease and the reaper unable to race. It returns the status to go back to if
-// the upload fails.
+// beginArchive checks for a live lease and held operations and moves to
+// archiving in one step under the lock, which is what makes a lease and the
+// reaper unable to race. Force skips only the held check (an open proxied
+// socket); a live lease always wins, since it is a caller's promise that a run
+// still uses the sandbox. It returns the status to go back to if the upload
+// fails.
 func (s *Sandbox) beginArchive(force bool) (runtime.SandboxStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.claimableLocked(); err != nil {
 		return "", err
 	}
-	if !force && (s.held > 0 || s.leasedUntil.After(time.Now())) {
+	if s.leasedUntil.After(time.Now()) || (!force && s.held > 0) {
 		return "", ErrInUse
 	}
 	prev := s.status

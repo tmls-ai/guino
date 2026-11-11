@@ -278,8 +278,8 @@ func (h *SandboxHandler) Lease(w http.ResponseWriter, r *http.Request) {
 
 // Archive handles POST /api/v1/sandboxes/{id}/archive[?force=true]. It saves
 // the state to the sandbox's archive key and removes it; on success the
-// sandbox is gone (404 from then on). Without force, a lease or a held
-// operation answers 409.
+// sandbox is gone (404 from then on). A live lease answers 409 even with
+// force; a held operation answers 409 only without it.
 func (h *SandboxHandler) Archive(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	force := r.URL.Query().Get("force") == "true"

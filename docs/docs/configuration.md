@@ -48,7 +48,7 @@ sandbox:
   allow_shared_volumes: true
   allow_s3: true
   allow_s3_fuse: false
-  allow_host_binds: false        # needs auth + loopback; see "Host binds" below
+  allow_host_binds: false        # needs auth + loopback or the desktop egress profile; see "Host binds" below
   host_bind_roots: []            # e.g. [{path: "/home/me/shared", read_only: true}]
   max_volumes_per_sandbox: 5
   default_tmpfs:
@@ -172,7 +172,13 @@ symlinks, only directories can be bound, a request can narrow a root or make it
 read-only but never widen it, and `/`, system paths such as `/etc`, `/sys`,
 `/var/run` or `/var/lib/docker`, anything inside them and any ancestor of them are
 refused (as a root at startup, and as a bind). `serve` refuses to start with host binds enabled unless
-`auth.enabled` is true and `server.host` is a loopback address.
+`auth.enabled` is true and sandboxes cannot reach the API: `server.host` is a loopback address, or
+`runtime.egress_profile` is `desktop` (so a fleet host can listen on its private address for its
+controller). The desktop profile closes only the bridge-to-host path: an INPUT drop for the bridge,
+and IPv6 turned off on the bridge. Other hosts are reached through the forward path, where only the
+blocked private ranges are dropped, so the network the hosts share must lie inside them (AWS also
+allows publicly routable VPC CIDRs, which would not be blocked), and the hosts' public addresses and
+API ports are the job of your firewall (security groups).
 
 ### The bind guard
 

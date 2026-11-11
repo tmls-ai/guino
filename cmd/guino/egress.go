@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -25,7 +28,7 @@ import (
 // is absent: the operator believes the LAN is unreachable while the agent can
 // still browse to the router.
 
-// iptablesRunner executes one invocation of `iptables` or `iptables-restore`
+// iptablesRunner executes one invocation of `iptables`, `iptables-restore` or `nft`
 // with stdin as input. Injectable so the wiring is testable without root,
 // without iptables and without a daemon.
 type iptablesRunner func(ctx context.Context, stdin, name string, args ...string) (string, error)
@@ -33,9 +36,13 @@ type iptablesRunner func(ctx context.Context, stdin, name string, args ...string
 func realIptables(ctx context.Context, stdin, name string, args ...string) (string, error) {
 	// -w waits for the xtables lock instead of failing when Docker happens to be
 	// writing rules at the same moment, which it does on every container start.
-	// name is "iptables" or "iptables-restore" and the arguments come only from
+	// name is "iptables", "iptables-restore" or "nft" (which has no -w and
+	// commits atomically) and the arguments come only from
 	// netpolicy, never from a request.
-	cmd := exec.CommandContext(ctx, name, append([]string{"-w", "5"}, args...)...) //nolint:gosec // G204: fixed binaries, internally built args
+	if name != "nft" {
+		args = append([]string{"-w", "5"}, args...)
+	}
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: fixed binaries, internally built args
 	cmd.Stdin = strings.NewReader(stdin)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -120,12 +127,40 @@ func applyEgressProfile(
 	if err := installEgressRules(ctx, rules, bridge, run, logger); err != nil {
 		return err
 	}
+	if err := disableBridgeIPv6(ipv6ConfDir, bridge); err != nil {
+		logger.Error(netpolicy.MsgEgressUnavailable, "step", "disable_ipv6", "error", err)
+		return errors.New(netpolicy.MsgEgressUnavailable)
+	}
 
 	logger.Info("egress profile installed",
 		"profile", profile,
 		"bridge", bridge,
 		"chain", netpolicy.EgressChainName(),
 		"blocked", strings.Join(netpolicy.BlockedEgressCIDRs(), ","))
+	return nil
+}
+
+// ipv6ConfDir holds the kernel's per-interface IPv6 switches.
+const ipv6ConfDir = "/proc/sys/net/ipv6/conf"
+
+// disableBridgeIPv6 turns IPv6 off on the bridge. The rules are IPv4 only, and
+// the API may listen dual-stack: with IPv6 up on the bridge, a sandbox could
+// reach the host over the bridge's link-local address and nothing would drop
+// it. With it off the kernel discards every IPv6 packet arriving on the bridge,
+// toward the host and through it. The managed network is IPv4 only, so nothing
+// legitimate is lost. A kernel without IPv6 (no conf directory) needs nothing;
+// a bridge that stays on is a refusal, like any rule that failed to install.
+func disableBridgeIPv6(confDir, bridge string) error {
+	if _, err := os.Stat(confDir); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	path := filepath.Join(confDir, bridge, "disable_ipv6")
+	if cur, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(cur)) == "1" { //nolint:gosec // G304: fixed kernel path, bridge name checked against this namespace
+		return nil
+	}
+	if err := os.WriteFile(path, []byte("1"), 0o600); err != nil {
+		return fmt.Errorf("disabling IPv6 on %s: %w", bridge, err)
+	}
 	return nil
 }
 
@@ -145,6 +180,17 @@ func installEgressRules(ctx context.Context, rules [][]string, bridge string, ru
 		if err := hookFirst(ctx, hook, run, logger); err != nil {
 			return refuse(strings.Join(hook, " "), err)
 		}
+	}
+	isolation, err := netpolicy.BridgeIsolationNft(bridge)
+	if err != nil {
+		return refuse("nft", err)
+	}
+	if _, err := run(ctx, isolation, "nft", "-f", "-"); errors.Is(err, exec.ErrNotFound) {
+		// ponytail: a single-user desktop VM may lack nft; a host shared by
+		// several tenants must have it (the fleet AMI does).
+		logger.Error("nft is not installed: sandboxes on this host are NOT isolated from each other over IPv6; install nftables on any host shared by more than one user", "bridge", bridge)
+	} else if err != nil {
+		return refuse("nft", err)
 	}
 	return nil
 }
