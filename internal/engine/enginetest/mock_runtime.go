@@ -35,11 +35,15 @@ type MockRuntime struct {
 	CopyToFn func(id string, content io.Reader) error
 	// Paused is the pause state per sandbox; PauseCalls and UnpauseCalls count
 	// calls. PauseFn, when set, decides each Pause.
-	Paused       map[string]bool
-	PauseCalls   int
-	UnpauseCalls int
-	UnpauseFn    func(ctx context.Context, id string) error
-	PauseFn      func(id string) error
+	// MemoryLimitCalls records every UpdateMemoryLimit call, guarded by mu.
+	// UpdateMemoryLimitFn, when set, decides each call's result.
+	MemoryLimitCalls    []MemoryLimitCall
+	UpdateMemoryLimitFn func(id string, memoryBytes int64) error
+	Paused              map[string]bool
+	PauseCalls          int
+	UnpauseCalls        int
+	UnpauseFn           func(ctx context.Context, id string) error
+	PauseFn             func(id string) error
 }
 
 // NewMockRuntime creates a new MockRuntime.
@@ -195,8 +199,28 @@ func (m *MockRuntime) Stats(_ context.Context, _ string) (*runtime.SandboxStats,
 	return &runtime.SandboxStats{CPUPercent: 5.0, MemoryUsage: 1024}, nil
 }
 
-func (m *MockRuntime) UpdateMemoryLimit(_ context.Context, _ string, _ int64) error {
+// MemoryLimitCall is one UpdateMemoryLimit call the mock received.
+type MemoryLimitCall struct {
+	ID    string
+	Bytes int64
+}
+
+func (m *MockRuntime) UpdateMemoryLimit(_ context.Context, id string, memoryBytes int64) error {
+	m.mu.Lock()
+	m.MemoryLimitCalls = append(m.MemoryLimitCalls, MemoryLimitCall{ID: id, Bytes: memoryBytes})
+	fn := m.UpdateMemoryLimitFn
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(id, memoryBytes)
+	}
 	return nil
+}
+
+// MemoryLimits returns a copy of the UpdateMemoryLimit calls so far.
+func (m *MockRuntime) MemoryLimits() []MemoryLimitCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]MemoryLimitCall(nil), m.MemoryLimitCalls...)
 }
 
 func (m *MockRuntime) CopyFrom(_ context.Context, id string, p string) (io.ReadCloser, error) {

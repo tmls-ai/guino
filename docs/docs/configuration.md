@@ -73,7 +73,7 @@ resource:
   pressure_threshold: 0.80        # Warning level (80%)
   critical_threshold: 0.90        # Critical level (90%)
   monitor_interval: "5s"          # Pressure sampling interval
-  enable_auto_throttle: true      # Dynamic memory.high adjustment
+  enable_auto_throttle: true      # Dynamic memory.high adjustment (Linux cgroup v2)
   min_memory_floor: 33554432      # 32MB minimum per container
 
 store:
@@ -238,7 +238,7 @@ Controls host memory pressure monitoring and dynamic container throttling.
 | `resource.pressure_threshold` | float | `0.80` | Memory usage ratio that triggers Warning level |
 | `resource.critical_threshold` | float | `0.90` | Memory usage ratio that triggers Critical level (blocks new sandboxes) |
 | `resource.monitor_interval` | duration | `5s` | How often to sample host memory pressure |
-| `resource.enable_auto_throttle` | bool | `true` | Automatically apply cgroup v2 `memory.high` limits when pressure rises |
+| `resource.enable_auto_throttle` | bool | `true` | Automatically apply cgroup v2 `memory.high` limits when pressure rises. Never above a sandbox's requested memory; never changes the hard limit |
 | `resource.min_memory_floor` | int | `33554432` (32MB) | Minimum memory per container, even under maximum pressure |
 
 ### Environment Variables
@@ -255,7 +255,7 @@ Controls host memory pressure monitoring and dynamic container throttling.
 ### Notes
 
 - Pressure levels use hysteresis: 2 consecutive readings are required before the level changes, preventing flapping
-- On Linux, throttling uses direct cgroup v2 `memory.high` writes (sub-ms). On macOS, it falls back to Docker API
+- On Linux, throttling uses direct cgroup v2 `memory.high` writes (sub-ms). On macOS/Docker Desktop, and on Linux without a writable cgroup v2 `memory.high`, throttling is skipped and Guino logs one warning. See [Resource Management](resources.md#pressure-throttling)
 - When `enable_auto_throttle` is false, pressure is still monitored and reported via `GET /api/v1/resources`, but no limits are applied
 
 ## Validation

@@ -2,15 +2,19 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"regexp"
-	"runtime"
+	goruntime "runtime"
 	"strconv"
+	"syscall"
 
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+
+	"github.com/tmls-ai/guino/internal/runtime"
 )
 
 // validContainerID matches Docker container IDs (hex) and Guino sandbox IDs (alphanumeric).
@@ -39,10 +43,18 @@ func NewCgroupManagerFromRuntime(rt *DockerRuntime) *CgroupManager {
 	return &CgroupManager{cli: rt.cli, logger: rt.logger}
 }
 
-// UpdateMemoryHigh sets the memory soft limit (cgroup v2 memory.high) for a container.
-// On Linux, it writes directly to the cgroup v2 memory.high file (throttle, not OOM kill).
-// Falls back to Docker API if direct write fails.
-// On macOS/Docker Desktop, it sets the hard memory limit via Docker API (best effort).
+// hostOS is the operating system Guino runs on. Tests override it.
+var hostOS = goruntime.GOOS
+
+// UpdateMemoryHigh sets the soft memory limit (cgroup v2 memory.high) of a
+// container; memoryHigh=0 removes the soft limit ("max").
+//
+// It never touches the hard limit (HostConfig.Memory, cgroup memory.max). The
+// hard limit is what the sandbox requested at create time, and a lower hard
+// limit under a running workload makes the kernel OOM-kill it instead of
+// throttling it. Where the host has no writable memory.high (macOS/Docker
+// Desktop, cgroup v1, a read-only or unpermitted cgroup mount), it returns
+// runtime.ErrMemoryThrottleUnsupported and changes nothing.
 func (cm *CgroupManager) UpdateMemoryHigh(ctx context.Context, containerID string, memoryHigh int64) error {
 	if memoryHigh < 0 {
 		return nil
@@ -50,49 +62,30 @@ func (cm *CgroupManager) UpdateMemoryHigh(ctx context.Context, containerID strin
 	if err := validateContainerID(containerID); err != nil {
 		return err
 	}
-
-	if runtime.GOOS == "linux" {
-		// memoryHigh=0 means remove limit; write "max" to cgroup
-		if err := cm.writeCgroupMemoryHigh(containerID, memoryHigh); err != nil {
-			cm.logger.Debug("direct cgroup write failed, trying Docker API",
-				"container", containerID, "error", err)
-			// Fallback: Docker API Memory (hard limit, not ideal but functional)
-			containerName := ContainerName(containerID)
-			_, apiErr := cm.cli.ContainerUpdate(ctx, containerName, container.UpdateConfig{
-				Resources: container.Resources{
-					Memory: memoryHigh,
-				},
-			})
-			if apiErr != nil {
-				return fmt.Errorf("updating memory limit for %s: cgroup=%w, api=%v", containerID, err, apiErr)
-			}
-		}
-		return nil
+	if hostOS != "linux" {
+		// Docker Desktop runs containers in a VM whose cgroups Guino cannot
+		// reach. The Docker API offers only the hard limit, so there is no
+		// safe way to throttle here.
+		return fmt.Errorf("%w: containers run in a VM on %s", runtime.ErrMemoryThrottleUnsupported, hostOS)
 	}
 
-	// macOS/Docker Desktop: hard memory limit via Docker API (cgroup not available)
-	// memoryHigh=0 removes the limit
-	containerName := ContainerName(containerID)
-	_, err := cm.cli.ContainerUpdate(ctx, containerName, container.UpdateConfig{
-		Resources: container.Resources{
-			Memory: memoryHigh, // 0 = unlimited
-		},
-	})
+	// Docker names the cgroup after the full container ID, not after the
+	// Guino sandbox ID in the container name (den-<id>).
+	inspect, err := cm.cli.ContainerInspect(ctx, ContainerName(containerID))
 	if err != nil {
-		return fmt.Errorf("updating memory limit for %s: %w", containerID, err)
+		return fmt.Errorf("inspecting container %s: %w", containerID, err)
 	}
-	return nil
+	return cm.writeCgroupMemoryHigh(inspect.ID, memoryHigh)
 }
 
-// writeCgroupMemoryHigh writes directly to the cgroup v2 memory.high file.
-func (cm *CgroupManager) writeCgroupMemoryHigh(containerID string, memoryHigh int64) error {
-	if runtime.GOOS != "linux" {
-		return fmt.Errorf("direct cgroup write not supported on %s", runtime.GOOS)
+// writeCgroupMemoryHigh writes memory.high for a Docker container ID.
+func (cm *CgroupManager) writeCgroupMemoryHigh(dockerID string, memoryHigh int64) error {
+	if err := validateContainerID(dockerID); err != nil {
+		return err
 	}
-
 	paths := []string{
-		fmt.Sprintf("/sys/fs/cgroup/system.slice/docker-%s.scope/memory.high", containerID),
-		fmt.Sprintf("/sys/fs/cgroup/docker/%s/memory.high", containerID),
+		fmt.Sprintf("/sys/fs/cgroup/system.slice/docker-%s.scope/memory.high", dockerID), // systemd driver
+		fmt.Sprintf("/sys/fs/cgroup/docker/%s/memory.high", dockerID),                    // cgroupfs driver
 	}
 
 	// "max" means unlimited in cgroup v2
@@ -101,22 +94,69 @@ func (cm *CgroupManager) writeCgroupMemoryHigh(containerID string, memoryHigh in
 		value = strconv.FormatInt(memoryHigh, 10)
 	}
 
-	var lastErr error
+	var errs []error
 	for _, path := range paths {
-		if err := writeFile(path, value); err != nil {
-			lastErr = err
-			continue
+		err := writeFile(path, value)
+		if err == nil {
+			return nil
 		}
-		return nil
+		errs = append(errs, err)
 	}
 
-	return fmt.Errorf("could not write memory.high for container %s: %w", containerID, lastErr)
+	err := errors.Join(errs...)
+	if hostLacksMemoryHigh(errs) {
+		return fmt.Errorf("%w: could not write memory.high for container %s: %w",
+			runtime.ErrMemoryThrottleUnsupported, dockerID, err)
+	}
+	return fmt.Errorf("could not write memory.high for container %s: %w", dockerID, err)
+}
+
+// cgroupV2Marker exists only on a cgroup v2 (unified) mount.
+const cgroupV2Marker = "/sys/fs/cgroup/cgroup.controllers"
+
+// statFile is os.Stat. Tests override it.
+var statFile = os.Stat
+
+// hostLacksMemoryHigh reports whether the failed writes show a property of the
+// host rather than of one container: a read-only or unpermitted cgroup mount
+// (rootless Docker, Guino in a container), or no cgroup v2 at all. A missing
+// file on a cgroup v2 host is one container's cgroup that is gone, so it is an
+// ordinary error and must not switch throttling off for every sandbox.
+func hostLacksMemoryHigh(errs []error) bool {
+	if len(errs) == 0 {
+		return false
+	}
+	if allErrs(errs, fs.ErrPermission, syscall.EROFS) {
+		return true
+	}
+	if allErrs(errs, fs.ErrNotExist) {
+		_, statErr := statFile(cgroupV2Marker)
+		return errors.Is(statErr, fs.ErrNotExist)
+	}
+	return false
+}
+
+// allErrs reports whether every error in errs matches one of targets.
+func allErrs(errs []error, targets ...error) bool {
+	for _, err := range errs {
+		matched := false
+		for _, target := range targets {
+			if errors.Is(err, target) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
 }
 
 // UpdateOOMScore sets the OOM score adjustment for a container's main process.
 // Only works on Linux.
 func (cm *CgroupManager) UpdateOOMScore(ctx context.Context, containerID string, score int) error {
-	if runtime.GOOS != "linux" {
+	if hostOS != "linux" {
 		return nil
 	}
 	if score < -1000 || score > 1000 {
