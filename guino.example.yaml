@@ -155,7 +155,9 @@ s3:
   # A state host or one with oci_runtime set must use egress_profile "desktop".
 
 resource:
-  # enable_auto_throttle lowers every running sandbox's memory limit under
-  # host memory pressure. Autoscaled sandbox hosts run with it off and rely on
+  # enable_auto_throttle lowers every running sandbox's soft memory limit
+  # (cgroup v2 memory.high) under host memory pressure, never above the memory
+  # the sandbox requested and never its hard limit. It does nothing on
+  # macOS/Docker Desktop. Autoscaled sandbox hosts run with it off and rely on
   # swap and admission (create answers 503 under critical pressure) instead.
   enable_auto_throttle: true

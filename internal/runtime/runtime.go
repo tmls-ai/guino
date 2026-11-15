@@ -21,6 +21,12 @@ var ErrImageNotFound = errors.New("sandbox image not present on this machine")
 // path", and it cost real debugging time on a run that had in fact succeeded.
 var ErrFileNotFound = errors.New("file not found")
 
+// ErrMemoryThrottleUnsupported reports that the runtime cannot set a soft
+// memory limit (cgroup v2 memory.high) on this host. Pressure throttling then
+// does nothing: the only other knob is the hard limit, and a hard limit lowered
+// under a running workload is an OOM kill, not a throttle.
+var ErrMemoryThrottleUnsupported = errors.New("soft memory limit (memory.high) not available on this host")
+
 // SandboxStatus represents the current state of a sandbox.
 type SandboxStatus string
 
@@ -291,5 +297,10 @@ type Runtime interface {
 	Stats(ctx context.Context, id string) (*SandboxStats, error)
 
 	// Resource management
+
+	// UpdateMemoryLimit sets the soft memory limit (memory.high) of a running
+	// sandbox; 0 removes it. It never changes the hard limit the sandbox was
+	// created with. It returns ErrMemoryThrottleUnsupported when the host has
+	// no soft limit to set.
 	UpdateMemoryLimit(ctx context.Context, id string, memoryBytes int64) error
 }

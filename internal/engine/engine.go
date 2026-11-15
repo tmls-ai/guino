@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/xid"
@@ -70,6 +71,12 @@ type Engine struct {
 	shutdownOnce    sync.Once
 	pressureMonitor *PressureMonitor
 	pressureCh      chan PressureEvent
+	// throttleUnsupported is set once the runtime reports that this host has
+	// no soft memory limit; pressure throttling then stops for good.
+	throttleUnsupported atomic.Bool
+	// throttled holds the IDs of sandboxes that have a pressure soft limit
+	// set (map[string]struct{}), so release reaches exactly those.
+	throttled sync.Map
 }
 
 // NewEngine creates a new Engine.
@@ -180,18 +187,26 @@ func (e *Engine) onPressureChange(evt PressureEvent) {
 	}
 }
 
-// removeContainerMemoryLimits restores unlimited memory for all running containers.
+// removeContainerMemoryLimits removes the pressure soft limit (memory.high)
+// from every sandbox that has one. The hard limit each sandbox requested
+// stays. It runs even after throttling was found unsupported, so a sandbox
+// throttled before that point is not left throttled.
 func (e *Engine) removeContainerMemoryLimits() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	e.sandboxes.Range(func(_, v any) bool {
-		sb := v.(*Sandbox)
-		if sb.GetStatus() == runtime.StatusRunning {
-			// 0 means remove the limit (unlimited)
-			if err := e.runtime.UpdateMemoryLimit(ctx, sb.ID, 0); err != nil {
-				e.logger.Warn("failed to remove memory limit", "id", sb.ID, "error", err)
-			}
+	e.throttled.Range(func(k, _ any) bool {
+		id := k.(string)
+		v, ok := e.sandboxes.Load(id)
+		if !ok || v.(*Sandbox).GetStatus() != runtime.StatusRunning {
+			e.throttled.Delete(id)
+			return true
 		}
+		// 0 removes the soft limit only (memory.high = max).
+		if err := e.runtime.UpdateMemoryLimit(ctx, id, 0); err != nil {
+			e.logger.Warn("failed to remove memory limit", "id", id, "error", err)
+			return true
+		}
+		e.throttled.Delete(id)
 		return true
 	})
 }
@@ -201,12 +216,20 @@ func (e *Engine) removeContainerMemoryLimits() {
 const memoryHighSafetyFactor = 0.8
 
 func (e *Engine) updateContainerMemoryLimits(evt PressureEvent) {
-	// Single Range pass: collect running sandbox IDs for consistent snapshot
-	var targets []string
+	if e.throttleUnsupported.Load() {
+		return
+	}
+
+	// Single Range pass: collect running sandboxes for a consistent snapshot.
+	type target struct {
+		id        string
+		requested int64
+	}
+	var targets []target
 	e.sandboxes.Range(func(_, v any) bool {
 		sb := v.(*Sandbox)
 		if sb.GetStatus() == runtime.StatusRunning {
-			targets = append(targets, sb.ID)
+			targets = append(targets, target{id: sb.ID, requested: sb.Config.Memory})
 		}
 		return true
 	})
@@ -215,29 +238,59 @@ func (e *Engine) updateContainerMemoryLimits(evt PressureEvent) {
 		return
 	}
 
-	// Calculate memory.high per container with underflow guard
+	// Calculate the shared memory.high per container with underflow guard
 	var freeMemory uint64
 	if evt.MemoryTotal > evt.MemoryUsed {
 		freeMemory = evt.MemoryTotal - evt.MemoryUsed
 	}
-	memoryHigh := int64(float64(freeMemory)*memoryHighSafetyFactor) / int64(len(targets))
-	minFloor := e.resourceConfig.MinMemoryFloor
-	if memoryHigh < minFloor {
-		memoryHigh = minFloor
-	}
+	shared := int64(float64(freeMemory)*memoryHighSafetyFactor) / int64(len(targets))
 
 	e.logger.Info("adjusting container memory limits",
-		"memory_high", memoryHigh,
+		"memory_high", shared,
 		"active_containers", len(targets),
 	)
 
-	// Apply memory limits to collected targets
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	for _, id := range targets {
-		if err := e.runtime.UpdateMemoryLimit(ctx, id, memoryHigh); err != nil {
-			e.logger.Warn("failed to update memory limit", "id", id, "error", err)
+	for _, t := range targets {
+		if !e.applyMemoryHigh(ctx, t.id, memoryHighTarget(shared, e.resourceConfig.MinMemoryFloor, t.requested)) {
+			return
 		}
+	}
+}
+
+// memoryHighTarget is the memory.high value for one sandbox: its share of free
+// host memory, raised to the configured floor, and never above the memory the
+// sandbox requested (requested=0 means no hard limit, so no cap). A soft limit
+// above the hard limit throttles nothing, and the request is what the caller
+// sized the workload for.
+func memoryHighTarget(shared, floor, requested int64) int64 {
+	v := max(shared, floor)
+	if requested > 0 && v > requested {
+		v = requested
+	}
+	// Never 0: for memory.high, 0 would mean "remove the limit".
+	return max(v, 1)
+}
+
+// applyMemoryHigh sets one container's soft limit and records it for release.
+// It returns false when the runtime has no soft limit on this host; the caller
+// then stops, and the engine logs that once and skips all later throttling.
+func (e *Engine) applyMemoryHigh(ctx context.Context, id string, memoryHigh int64) bool {
+	err := e.runtime.UpdateMemoryLimit(ctx, id, memoryHigh)
+	switch {
+	case err == nil:
+		e.throttled.Store(id, struct{}{})
+		return true
+	case errors.Is(err, runtime.ErrMemoryThrottleUnsupported):
+		if e.throttleUnsupported.CompareAndSwap(false, true) {
+			e.logger.Warn("memory pressure throttling unavailable on this host; sandbox memory limits stay as requested",
+				"error", err)
+		}
+		return false
+	default:
+		e.logger.Warn("failed to update memory limit", "id", id, "error", err)
+		return true
 	}
 }
 
