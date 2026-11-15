@@ -25,14 +25,17 @@ func NewSandboxHandler(eng *engine.Engine, logger *slog.Logger) *SandboxHandler 
 }
 
 type createSandboxRequest struct {
-	Image   string                 `json:"image"`
-	Env     map[string]string      `json:"env,omitempty"`
-	WorkDir string                 `json:"workdir,omitempty"`
-	Timeout int                    `json:"timeout,omitempty"` // seconds
-	CPU     int64                  `json:"cpu,omitempty"`
-	Memory  int64                  `json:"memory,omitempty"`
-	Ports   []runtime.PortMapping  `json:"ports,omitempty"`
-	Storage *runtime.StorageConfig `json:"storage,omitempty"`
+	Image   string            `json:"image"`
+	Env     map[string]string `json:"env,omitempty"`
+	WorkDir string            `json:"workdir,omitempty"`
+	Timeout int               `json:"timeout,omitempty"` // seconds
+	CPU     int64             `json:"cpu,omitempty"`
+	Memory  int64             `json:"memory,omitempty"`
+	// PidLimit caps processes and threads (cgroup pids.max). 0 uses
+	// sandbox.default_pid_limit; a negative value is a 400.
+	PidLimit int64                  `json:"pid_limit,omitempty"`
+	Ports    []runtime.PortMapping  `json:"ports,omitempty"`
+	Storage  *runtime.StorageConfig `json:"storage,omitempty"`
 	// WritableRootfs opts out of the read-only rootfs default (secure default
 	// is read-only). Needed for heavyweight images (e.g. Chrome+VNC desktop).
 	WritableRootfs bool `json:"writable_rootfs,omitempty"`
@@ -91,6 +94,12 @@ func (h *SandboxHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// Docker reads a negative pids limit as unlimited, so a negative value
+	// must not reach the runtime.
+	if req.PidLimit < 0 {
+		writeError(w, http.StatusBadRequest, "pid_limit must be a positive integer, or 0 for the server default")
+		return
+	}
 
 	cfg := runtime.SandboxConfig{
 		Image:          req.Image,
@@ -98,6 +107,7 @@ func (h *SandboxHandler) Create(w http.ResponseWriter, r *http.Request) {
 		WorkDir:        req.WorkDir,
 		CPU:            req.CPU,
 		Memory:         req.Memory,
+		PidLimit:       req.PidLimit,
 		Ports:          req.Ports,
 		Storage:        req.Storage,
 		NetworkMode:    req.NetworkMode,
