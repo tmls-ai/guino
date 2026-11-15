@@ -37,6 +37,7 @@ POST /api/v1/sandboxes
   "timeout": 1800,
   "cpu": 1000000000,
   "memory": 536870912,
+  "pid_limit": 1024,
   "ports": [
     {"sandbox_port": 3000, "host_port": 0, "protocol": "tcp"}
   ],
@@ -67,6 +68,7 @@ POST /api/v1/sandboxes
 | `timeout` | int | `1800` | Idle expiry in seconds (30 min), refreshed by activity |
 | `cpu` | int | `0` | CPU in NanoCPUs (1e9 = 1 core) |
 | `memory` | int | `0` | Memory in bytes; default 0 means unlimited |
+| `pid_limit` | int | `256` | Maximum processes and threads (cgroup `pids.max`); default 0 uses `sandbox.default_pid_limit` (256). Negative values return `400`. Browser workloads (Chrome, ffmpeg) need more: one Remotion render uses about 210 threads |
 | `ports` | array | `[]` | Port mappings (`host_port: 0` for auto-assign) |
 | `storage` | object | `null` | Storage configuration (see below) |
 | `host_binds` | array | `[]` | `[{"host_path", "mount_path", "read_only"}]`, only inside `sandbox.host_bind_roots` (else `422`) |

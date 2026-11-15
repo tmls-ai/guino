@@ -227,3 +227,42 @@ func TestCreateWithAMissingRestoreKeyAnswers422(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"code":"restore_key_not_found"`)
 	assert.Equal(t, 0, eng.HostStats().Count)
 }
+
+// pid_limit was missing from the request struct, so the JSON field was
+// dropped and every sandbox got sandbox.default_pid_limit (256). Browser
+// workloads (Chrome, compositor, ffmpeg: about 210 threads) hit pids.max.
+func TestSandboxHandler_Create_PidLimit(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantCode int
+		wantPids int64
+	}{
+		{"explicit value reaches the runtime", `{"image":"ubuntu:24.04","pid_limit":1024}`, http.StatusCreated, 1024},
+		{"omitted uses the server default", `{"image":"ubuntu:24.04"}`, http.StatusCreated, 256},
+		{"zero uses the server default", `{"image":"ubuntu:24.04","pid_limit":0}`, http.StatusCreated, 256},
+		{"negative is refused", `{"image":"ubuntu:24.04","pid_limit":-1}`, http.StatusBadRequest, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eng := newTestEngine(t)
+			h := NewSandboxHandler(eng, slog.Default())
+
+			req := httptest.NewRequest("POST", "/api/v1/sandboxes", bytes.NewBufferString(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			h.Create(w, req)
+
+			require.Equal(t, tt.wantCode, w.Code, w.Body.String())
+			if tt.wantCode != http.StatusCreated {
+				assert.Empty(t, eng.ListSandboxes())
+				return
+			}
+			var resp sandboxResponse
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			sb, err := eng.GetSandbox(resp.ID)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantPids, sb.Config.PidLimit)
+		})
+	}
+}

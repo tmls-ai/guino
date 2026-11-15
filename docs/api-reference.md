@@ -66,6 +66,7 @@ Request body:
   "timeout": 1800,
   "cpu": 1000000000,
   "memory": 536870912,
+  "pid_limit": 1024,
   "ports": [
     {"sandbox_port": 3000, "host_port": 0, "protocol": "tcp"}
   ]
@@ -80,6 +81,7 @@ Request body:
 | `timeout` | int | `1800` | Idle expiry in seconds (default 30 min). Exec, file, session and proxy activity pushes `expires_at` out again, and an open exec stream or proxied connection keeps the sandbox alive. This is not a hard lifetime cap: a sandbox in continuous use does not expire |
 | `cpu` | int | `0` | CPU limit in NanoCPUs (1 core = 1e9) |
 | `memory` | int | `0` | Memory limit in bytes; default 0 means unlimited |
+| `pid_limit` | int | `256` | Maximum processes and threads (cgroup `pids.max`); default 0 uses `sandbox.default_pid_limit` (256). Negative values return `400`. Browser workloads (Chrome, ffmpeg) need more: one Remotion render uses about 210 threads |
 | `ports` | array | `[]` | Port mappings (set `host_port: 0` for auto-assign) |
 | `storage` | object | `null` | Storage configuration (see below) |
 | `host_binds` | array | `[]` | Host directories to mount: `[{"host_path", "mount_path", "read_only"}]`. Refused with `422` unless the server sets `sandbox.allow_host_binds` and the resolved path is inside a configured `sandbox.host_bind_roots` entry |
