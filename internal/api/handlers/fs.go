@@ -127,6 +127,10 @@ func (h *FileHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "sandbox not found")
 			return
 		}
+		if errors.Is(err, runtime.ErrFileNotFound) {
+			writeError(w, http.StatusNotFound, "directory not found: "+path)
+			return
+		}
 		h.logger.Error("internal error", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return

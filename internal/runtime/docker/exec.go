@@ -50,7 +50,13 @@ func (r *DockerRuntime) Exec(ctx context.Context, id string, opts runtime.ExecOp
 
 	if opts.Stdin != nil {
 		go func() {
-			_, _ = io.Copy(attachResp.Conn, opts.Stdin)
+			// A copy cut short must not look like the end of the input: closing
+			// only the write side would let the command finish on a partial
+			// stdin and exit 0. Closing the whole connection fails the read below.
+			if _, err := io.Copy(attachResp.Conn, opts.Stdin); err != nil {
+				attachResp.Close()
+				return
+			}
 			_ = attachResp.CloseWrite()
 		}()
 	}
