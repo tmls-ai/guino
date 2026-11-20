@@ -1,8 +1,8 @@
 package docker
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -24,6 +24,14 @@ func catError(path, id, stderr string) error {
 		return fmt.Errorf("%s in %s: %w", path, id, runtime.ErrFileNotFound)
 	}
 	return fmt.Errorf("reading file %s in %s: %s", path, id, stderr)
+}
+
+// lsError is catError for a failed `ls`: a missing directory is a 404 too.
+func lsError(path, id, stderr string) error {
+	if strings.Contains(stderr, "No such file or directory") {
+		return fmt.Errorf("%s in %s: %w", path, id, runtime.ErrFileNotFound)
+	}
+	return fmt.Errorf("listing dir %s in %s: %s", path, id, stderr)
 }
 
 // ReadFile reads a file from the container using exec-based cat approach.
@@ -48,9 +56,11 @@ func (r *DockerRuntime) ReadFile(ctx context.Context, id string, path string) ([
 }
 
 // WriteFile writes a file to the container using exec-based approach.
-// Uses exec (base64 + tee) instead of CopyToContainer because the latter
-// fails with read-only rootfs. Exec works through the container's mount
-// namespace and handles tmpfs correctly.
+// Uses exec instead of CopyToContainer because the latter fails with
+// read-only rootfs. Exec works through the container's mount namespace and
+// handles tmpfs correctly. The content goes in on stdin: carried in the
+// command line it hit the argument size limit, so files of a few MB failed.
+// The path is the script's "$1", so no shell ever parses it.
 func (r *DockerRuntime) WriteFile(ctx context.Context, id string, path string, content []byte) error {
 	dir := filepath.Dir(path)
 
@@ -65,18 +75,22 @@ func (r *DockerRuntime) WriteFile(ctx context.Context, id string, path string, c
 		return fmt.Errorf("creating dir for %s in %s: %s", path, id, mkdirResult.Stderr)
 	}
 
-	// Write via base64-encoded exec to handle binary content safely
-	encoded := base64.StdEncoding.EncodeToString(content)
 	result, err := r.Exec(ctx, id, runtime.ExecOpts{
-		Cmd: []string{"sh", "-c", fmt.Sprintf("echo '%s' | base64 -d > %s", encoded, path)},
+		Cmd:   writeFileCmd(path),
+		Stdin: bytes.NewReader(content),
 	})
 	if err != nil {
 		return fmt.Errorf("writing file %s in %s: %w", path, id, err)
 	}
 	if result.ExitCode != 0 {
-		return fmt.Errorf("writing file %s in %s: %s", path, id, result.Stderr)
+		return fmt.Errorf("writing file %s in %s: exit %d: %s", path, id, result.ExitCode, result.Stderr)
 	}
 	return nil
+}
+
+// writeFileCmd copies stdin to path. The path is an argument, never script text.
+func writeFileCmd(path string) []string {
+	return []string{"sh", "-c", `cat > "$1"`, "sh", path}
 }
 
 // ListDir lists the contents of a directory in the container.
@@ -90,7 +104,7 @@ func (r *DockerRuntime) ListDir(ctx context.Context, id string, path string) ([]
 		return nil, fmt.Errorf("listing dir %s in %s: %w", path, id, err)
 	}
 	if result.ExitCode != 0 {
-		return nil, fmt.Errorf("listing dir %s in %s: %s", path, id, result.Stderr)
+		return nil, lsError(path, id, result.Stderr)
 	}
 
 	return parseLsOutput(result.Stdout, path), nil

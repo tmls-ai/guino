@@ -23,3 +23,18 @@ func TestCatErrorClassification(t *testing.T) {
 		t.Errorf("a permission error must not become a 404: %v", denied)
 	}
 }
+
+// GNU and BusyBox ls word a missing directory differently; both are a 404.
+func TestLsErrorClassification(t *testing.T) {
+	for _, stderr := range []string{
+		"ls: cannot access '/workspace/.skills': No such file or directory\n",
+		"ls: /workspace/.skills: No such file or directory\n",
+	} {
+		if err := lsError("/workspace/.skills", "abc", stderr); !errors.Is(err, runtime.ErrFileNotFound) {
+			t.Errorf("missing directory not classified: %v", err)
+		}
+	}
+	if err := lsError("/root", "abc", "ls: can't open '/root': Permission denied\n"); errors.Is(err, runtime.ErrFileNotFound) {
+		t.Errorf("a permission error must not become a 404: %v", err)
+	}
+}
