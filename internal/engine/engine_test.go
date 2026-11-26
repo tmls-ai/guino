@@ -218,24 +218,27 @@ func TestEngine_ExecRevivesExitedContainer(t *testing.T) {
 		func() error { _, err := eng.ListDir(ctx, sb.ID, "/workspace"); return err },
 		func() error { return eng.WriteFile(ctx, sb.ID, "/workspace/a", []byte("a")) },
 	} {
-		sb.revivedAt = time.Time{} // past the backoff
+		sb.revives = nil // a fresh window each time
 		mock.Exited[sb.ID] = true
 		require.NoError(t, call())
 		assert.False(t, mock.Exited[sb.ID])
 	}
 }
 
-// A container that dies again right after it was started is left stopped,
-// so an image that exits at once does not loop.
+// A container started again reviveBurst times within a minute is left
+// stopped the next time it dies, so an image that dies at once does not loop;
+// fewer deaths than that, even back to back, are all recovered.
 func TestEngine_ReviveBacksOff(t *testing.T) {
 	eng, mock := newTestEngine(t)
 	ctx := context.Background()
 	sb, err := eng.CreateSandbox(ctx, runtime.SandboxConfig{Image: "test:latest"})
 	require.NoError(t, err)
 
-	mock.Exited[sb.ID] = true
-	_, err = eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
-	require.NoError(t, err)
+	for range reviveBurst {
+		mock.Exited[sb.ID] = true
+		_, err = eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
+		require.NoError(t, err)
+	}
 
 	mock.Exited[sb.ID] = true
 	_, err = eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
