@@ -609,12 +609,14 @@ func reviving[T any](ctx context.Context, e *Engine, id string, op func() (T, er
 	return v, err
 }
 
-// reviveTimeout bounds one start of a dead container; reviveBackoff is how
-// soon after a start a container that died again is left stopped instead of
-// started once more, so an image that dies at once does not loop.
+// reviveTimeout bounds one start of a dead container. A container started
+// again reviveBurst times within reviveWindow is left stopped the next time it
+// dies, so an image that dies at once does not loop, while a user who kills
+// the init twice in a row still gets the container back.
 const (
 	reviveTimeout = time.Minute
-	reviveBackoff = 10 * time.Second
+	reviveWindow  = time.Minute
+	reviveBurst   = 3
 )
 
 // revive starts again the container of a sandbox Guino holds as running when
@@ -626,8 +628,8 @@ const (
 // container running and goes on. It holds the sandbox's claim, so a stop,
 // start, archive or destroy in flight is left alone, and it is admitted like
 // a Start (not while draining or under critical pressure). A container that is
-// not started again (the host is draining, the start failed, or it died again
-// within reviveBackoff) is recorded as stopped, which GET reports; one refused
+// not started again (the host is draining, the start failed, or it was started
+// again reviveBurst times within reviveWindow) is recorded as stopped, which GET reports; one refused
 // for pressure stays as it is for the next call. Reports whether the container
 // runs.
 func (e *Engine) revive(ctx context.Context, sb *Sandbox) bool {
@@ -659,14 +661,21 @@ func (e *Engine) revive(ctx context.Context, sb *Sandbox) bool {
 	if err != nil && !errors.Is(err, ErrDraining) {
 		return false // pressure passes: the next call tries again
 	}
-	if err == nil && time.Since(sb.revivedAt) < reviveBackoff {
-		err = fmt.Errorf("died again within %s of its last start", reviveBackoff)
+	recent := sb.revives[:0]
+	for _, at := range sb.revives {
+		if time.Since(at) < reviveWindow {
+			recent = append(recent, at)
+		}
+	}
+	sb.revives = recent
+	if err == nil && len(recent) >= reviveBurst {
+		err = fmt.Errorf("started again %d times within %s", len(recent), reviveWindow)
 	}
 	if err == nil {
 		err = e.runtime.Start(ctx, sb.ID)
 	}
 	if err == nil {
-		sb.revivedAt = time.Now()
+		sb.revives = append(sb.revives, time.Now())
 		e.logger.Warn("sandbox container exited on its own, started again", "id", sb.ID, "docker_status", info.Status)
 		return true
 	}
