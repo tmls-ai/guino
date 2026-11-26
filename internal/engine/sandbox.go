@@ -44,6 +44,10 @@ type Sandbox struct {
 	stuck       bool
 	failures    int
 	nextAttempt time.Time
+	// reviveMu lets one caller at a time start a dead container again (see
+	// Engine.revive); revivedAt is when it last did, guarded by reviveMu.
+	reviveMu  sync.Mutex
+	revivedAt time.Time
 }
 
 // Touch records activity and pushes the expiry out by the sandbox's idle window.

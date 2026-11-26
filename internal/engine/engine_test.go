@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -208,10 +209,81 @@ func TestEngine_ExecRevivesExitedContainer(t *testing.T) {
 	assert.True(t, mock.Started[sb.ID])
 	assert.Equal(t, runtime.StatusRunning, sb.GetStatus())
 
-	// The file and session paths run on exec too.
-	mock.Exited[sb.ID] = true
-	_, err = eng.ListDir(ctx, sb.ID, "/workspace")
+	// Streams and the file calls run on exec too.
+	for _, call := range []func() error{
+		func() error {
+			_, err := eng.ExecStream(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
+			return err
+		},
+		func() error { _, err := eng.ListDir(ctx, sb.ID, "/workspace"); return err },
+		func() error { return eng.WriteFile(ctx, sb.ID, "/workspace/a", []byte("a")) },
+	} {
+		sb.revivedAt = time.Time{} // past the backoff
+		mock.Exited[sb.ID] = true
+		require.NoError(t, call())
+		assert.False(t, mock.Exited[sb.ID])
+	}
+}
+
+// A container that dies again right after it was started is left stopped,
+// so an image that exits at once does not loop.
+func TestEngine_ReviveBacksOff(t *testing.T) {
+	eng, mock := newTestEngine(t)
+	ctx := context.Background()
+	sb, err := eng.CreateSandbox(ctx, runtime.SandboxConfig{Image: "test:latest"})
 	require.NoError(t, err)
+
+	mock.Exited[sb.ID] = true
+	_, err = eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
+	require.NoError(t, err)
+
+	mock.Exited[sb.ID] = true
+	_, err = eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
+	assert.ErrorIs(t, err, runtime.ErrContainerNotRunning)
+	assert.Equal(t, runtime.StatusStopped, sb.GetStatus())
+}
+
+// Calls that hit the same dead container together all succeed: one starts it,
+// the others wait and find it running.
+func TestEngine_ConcurrentRevive(t *testing.T) {
+	eng, mock := newTestEngine(t)
+	ctx := context.Background()
+	sb, err := eng.CreateSandbox(ctx, runtime.SandboxConfig{Image: "test:latest"})
+	require.NoError(t, err)
+
+	starts := 0
+	mock.StartFn = func(string) error { starts++; time.Sleep(20 * time.Millisecond); return nil }
+	mock.Exited[sb.ID] = true
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs {
+		assert.NoError(t, err)
+	}
+	assert.Equal(t, 1, starts)
+}
+
+// A caller whose request is already cancelled still gets the container
+// started; the status never records stopped for a start it cut off.
+func TestEngine_ReviveOutlivesCancelledRequest(t *testing.T) {
+	eng, mock := newTestEngine(t)
+	sb, err := eng.CreateSandbox(context.Background(), runtime.SandboxConfig{Image: "test:latest"})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	mock.StartFn = func(string) error { return nil }
+	mock.Exited[sb.ID] = true
+	_, _ = eng.Info(ctx, sb.ID)
+	assert.False(t, mock.Exited[sb.ID])
+	assert.Equal(t, runtime.StatusRunning, sb.GetStatus())
 }
 
 // GET (Info) on a dead container starts it again too, so it never answers
