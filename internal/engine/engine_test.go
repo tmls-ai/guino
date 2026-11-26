@@ -358,3 +358,20 @@ func TestEngine_ReviveLeavesBusySandbox(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, mock.Started[sb.ID])
 }
+
+// A draining host starts nothing: the dead container is recorded stopped, so
+// the caller moves the project to another host.
+func TestEngine_ReviveRefusedWhileDraining(t *testing.T) {
+	eng, mock := newTestEngine(t)
+	ctx := context.Background()
+	sb, err := eng.CreateSandbox(ctx, runtime.SandboxConfig{Image: "test:latest"})
+	require.NoError(t, err)
+	mock.Started[sb.ID] = false
+
+	eng.Drain()
+	mock.Exited[sb.ID] = true
+	_, err = eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
+	assert.ErrorIs(t, err, runtime.ErrContainerNotRunning)
+	assert.False(t, mock.Started[sb.ID])
+	assert.Equal(t, runtime.StatusStopped, sb.GetStatus())
+}
