@@ -626,15 +626,18 @@ const (
 // container running and goes on. It holds the sandbox's claim, so a stop,
 // start, archive or destroy in flight is left alone, and it is admitted like
 // a Start (not while draining or under critical pressure). A container that is
-// not started again (refused, failed, or dead again within reviveBackoff) is
-// recorded as stopped, which GET reports. Reports whether the container runs.
+// not started again (the host is draining, the start failed, or it died again
+// within reviveBackoff) is recorded as stopped, which GET reports; one refused
+// for pressure stays as it is for the next call. Reports whether the container
+// runs.
 func (e *Engine) revive(ctx context.Context, sb *Sandbox) bool {
-	// The caller's request may end any moment; a start cut off half way would
-	// leave the status wrong.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reviveTimeout)
-	defer cancel()
 	sb.reviveMu.Lock()
 	defer sb.reviveMu.Unlock()
+	// The caller's request may end any moment; a start cut off half way would
+	// leave the status wrong. Taken after the lock, so a waiter gets its own.
+	base := context.WithoutCancel(ctx)
+	ctx, cancel := context.WithTimeout(base, reviveTimeout)
+	defer cancel()
 	if sb.claim() != nil {
 		return false
 	}
@@ -653,6 +656,9 @@ func (e *Engine) revive(ctx context.Context, sb *Sandbox) bool {
 		return false // destroyed meanwhile
 	}
 	err = e.admit(true, nil)
+	if err != nil && !errors.Is(err, ErrDraining) {
+		return false // pressure passes: the next call tries again
+	}
 	if err == nil && time.Since(sb.revivedAt) < reviveBackoff {
 		err = fmt.Errorf("died again within %s of its last start", reviveBackoff)
 	}
@@ -664,7 +670,10 @@ func (e *Engine) revive(ctx context.Context, sb *Sandbox) bool {
 		e.logger.Warn("sandbox container exited on its own, started again", "id", sb.ID, "docker_status", info.Status)
 		return true
 	}
-	if after, ierr := e.runtime.Info(ctx, sb.ID); ierr == nil && after.Status == runtime.StatusRunning {
+	check, cancelCheck := context.WithTimeout(base, 10*time.Second)
+	after, ierr := e.runtime.Info(check, sb.ID)
+	cancelCheck()
+	if ierr == nil && after.Status == runtime.StatusRunning {
 		return true
 	}
 	sb.setStatus(runtime.StatusStopped)
