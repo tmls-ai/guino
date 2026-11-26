@@ -476,6 +476,10 @@ func (e *Engine) StartSandbox(ctx context.Context, id string) error {
 	}
 
 	sandbox.setStatus(runtime.StatusRunning)
+	// A start asked for is a fresh run: earlier restarts no longer count.
+	sandbox.reviveMu.Lock()
+	sandbox.revives = nil
+	sandbox.reviveMu.Unlock()
 	if err := e.saveSandbox(sandbox); err != nil {
 		e.logger.Warn("failed to save sandbox state after start", "id", id, "error", err)
 	}
