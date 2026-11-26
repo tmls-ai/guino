@@ -244,6 +244,12 @@ func TestEngine_ReviveBacksOff(t *testing.T) {
 	_, err = eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
 	assert.ErrorIs(t, err, runtime.ErrContainerNotRunning)
 	assert.Equal(t, runtime.StatusStopped, sb.GetStatus())
+
+	// POST /start begins afresh: the next death is recovered again.
+	require.NoError(t, eng.StartSandbox(ctx, sb.ID))
+	mock.Exited[sb.ID] = true
+	_, err = eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
+	require.NoError(t, err)
 }
 
 // Calls that hit the same dead container together all succeed: one starts it,
