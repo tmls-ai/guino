@@ -21,6 +21,11 @@ var ErrImageNotFound = errors.New("sandbox image not present on this machine")
 // path", and it cost real debugging time on a run that had in fact succeeded.
 var ErrFileNotFound = errors.New("file not found")
 
+// ErrContainerNotRunning is an exec the container refused because it was not
+// running (Docker answers a conflict for a stopped, restarting or paused one).
+// Nothing ran, so the caller may start the container and try again.
+var ErrContainerNotRunning = errors.New("sandbox container is not running")
+
 // ErrMemoryThrottleUnsupported reports that the runtime cannot set a soft
 // memory limit (cgroup v2 memory.high) on this host. Pressure throttling then
 // does nothing: the only other knob is the hard limit, and a hard limit lowered

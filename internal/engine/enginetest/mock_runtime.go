@@ -40,10 +40,15 @@ type MockRuntime struct {
 	MemoryLimitCalls    []MemoryLimitCall
 	UpdateMemoryLimitFn func(id string, memoryBytes int64) error
 	Paused              map[string]bool
-	PauseCalls          int
-	UnpauseCalls        int
-	UnpauseFn           func(ctx context.Context, id string) error
-	PauseFn             func(id string) error
+	// Exited marks a container whose process ended on its own: Info reports
+	// it stopped and Exec refuses it until the next Start. StartFn, when set,
+	// decides each Start.
+	Exited       map[string]bool
+	StartFn      func(id string) error
+	PauseCalls   int
+	UnpauseCalls int
+	UnpauseFn    func(ctx context.Context, id string) error
+	PauseFn      func(id string) error
 }
 
 // NewMockRuntime creates a new MockRuntime.
@@ -55,6 +60,7 @@ func NewMockRuntime() *MockRuntime {
 		Removed:  make(map[string]bool),
 		CopiedTo: make(map[string][]byte),
 		Paused:   make(map[string]bool),
+		Exited:   make(map[string]bool),
 	}
 }
 
@@ -68,9 +74,15 @@ func (m *MockRuntime) Create(_ context.Context, id string, cfg runtime.SandboxCo
 }
 
 func (m *MockRuntime) Start(_ context.Context, id string) error {
+	if m.StartFn != nil {
+		if err := m.StartFn(id); err != nil {
+			return err
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Started[id] = true
+	delete(m.Exited, id)
 	return nil
 }
 
@@ -126,12 +138,12 @@ func (m *MockRuntime) IsPaused(id string) bool {
 	return m.Paused[id]
 }
 
-// Info reports running, or stopped while paused (as Docker's mapping does).
+// Info reports running, or stopped while paused (as Docker's mapping does) or exited.
 func (m *MockRuntime) Info(_ context.Context, id string) (*runtime.SandboxInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	status := runtime.StatusRunning
-	if m.Paused[id] {
+	if m.Paused[id] || m.Exited[id] {
 		status = runtime.StatusStopped
 	}
 	return &runtime.SandboxInfo{ID: id, Status: status, IP: m.IP, Paused: m.Paused[id]}, nil
@@ -142,6 +154,12 @@ func (m *MockRuntime) List(_ context.Context) ([]runtime.SandboxInfo, error) {
 }
 
 func (m *MockRuntime) Exec(ctx context.Context, id string, opts runtime.ExecOpts) (*runtime.ExecResult, error) {
+	m.mu.Lock()
+	exited := m.Exited[id]
+	m.mu.Unlock()
+	if exited {
+		return nil, runtime.ErrContainerNotRunning
+	}
 	if m.ExecFn != nil {
 		return m.ExecFn(ctx, id, opts)
 	}

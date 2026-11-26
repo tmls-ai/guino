@@ -182,10 +182,12 @@ func (h *SandboxHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to get sandbox")
 		return
 	}
+	// Info first: it also records a container that exited on its own, so the
+	// status answered below is the live one. The IP is best-effort (absent on
+	// stopped sandboxes or non-routable hosts).
+	info, ierr := h.engine.Info(r.Context(), id)
 	resp := toSandboxResponse(sandbox)
-	// Enrich with the live container IP (best-effort; absent on stopped
-	// sandboxes or non-routable hosts).
-	if info, ierr := h.engine.Info(r.Context(), id); ierr == nil {
+	if ierr == nil {
 		resp.IP = info.IP
 	}
 	writeJSON(w, http.StatusOK, resp)
