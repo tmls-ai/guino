@@ -71,7 +71,7 @@ func (h *ExecHandler) Exec(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "sandbox not found")
 			return
 		}
-		if errors.Is(err, engine.ErrNotRunning) {
+		if errors.Is(err, engine.ErrNotRunning) || errors.Is(err, runtime.ErrContainerNotRunning) {
 			writeError(w, http.StatusConflict, "sandbox is not running")
 			return
 		}

@@ -73,7 +73,10 @@ func (m *MockRuntime) Create(_ context.Context, id string, cfg runtime.SandboxCo
 	return nil
 }
 
-func (m *MockRuntime) Start(_ context.Context, id string) error {
+func (m *MockRuntime) Start(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err // a cancelled request never reaches Docker
+	}
 	if m.StartFn != nil {
 		if err := m.StartFn(id); err != nil {
 			return err
@@ -154,11 +157,8 @@ func (m *MockRuntime) List(_ context.Context) ([]runtime.SandboxInfo, error) {
 }
 
 func (m *MockRuntime) Exec(ctx context.Context, id string, opts runtime.ExecOpts) (*runtime.ExecResult, error) {
-	m.mu.Lock()
-	exited := m.Exited[id]
-	m.mu.Unlock()
-	if exited {
-		return nil, runtime.ErrContainerNotRunning
+	if err := m.refuse(id); err != nil {
+		return nil, err
 	}
 	if m.ExecFn != nil {
 		return m.ExecFn(ctx, id, opts)
@@ -166,35 +166,55 @@ func (m *MockRuntime) Exec(ctx context.Context, id string, opts runtime.ExecOpts
 	return &runtime.ExecResult{ExitCode: 0, Stdout: "ok\n"}, nil
 }
 
+// refuse is Docker's answer to an exec in a container that has exited; every
+// exec-backed call (exec, streams, the file calls) gets it.
+func (m *MockRuntime) refuse(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.Exited[id] {
+		return runtime.ErrContainerNotRunning
+	}
+	return nil
+}
+
 func (m *MockRuntime) ExecStream(ctx context.Context, id string, opts runtime.ExecOpts) (runtime.ExecStream, error) {
+	if err := m.refuse(id); err != nil {
+		return nil, err
+	}
 	if m.ExecStreamFn != nil {
 		return m.ExecStreamFn(ctx, id, opts)
 	}
 	return nil, nil
 }
 
-func (m *MockRuntime) ReadFile(_ context.Context, _ string, _ string) ([]byte, error) {
+func (m *MockRuntime) ReadFile(_ context.Context, id string, _ string) ([]byte, error) {
+	if err := m.refuse(id); err != nil {
+		return nil, err
+	}
 	return []byte("content"), nil
 }
 
-func (m *MockRuntime) WriteFile(_ context.Context, _ string, _ string, _ []byte) error {
-	return nil
+func (m *MockRuntime) WriteFile(_ context.Context, id string, _ string, _ []byte) error {
+	return m.refuse(id)
 }
 
-func (m *MockRuntime) ListDir(_ context.Context, _ string, _ string) ([]runtime.FileInfo, error) {
-	return nil, nil
+func (m *MockRuntime) ListDir(_ context.Context, id string, _ string) ([]runtime.FileInfo, error) {
+	return nil, m.refuse(id)
 }
 
-func (m *MockRuntime) Stat(_ context.Context, _ string, _ string) (*runtime.FileInfo, error) {
+func (m *MockRuntime) Stat(_ context.Context, id string, _ string) (*runtime.FileInfo, error) {
+	if err := m.refuse(id); err != nil {
+		return nil, err
+	}
 	return &runtime.FileInfo{}, nil
 }
 
-func (m *MockRuntime) MkDir(_ context.Context, _ string, _ string) error {
-	return nil
+func (m *MockRuntime) MkDir(_ context.Context, id string, _ string) error {
+	return m.refuse(id)
 }
 
-func (m *MockRuntime) RemoveFile(_ context.Context, _ string, _ string) error {
-	return nil
+func (m *MockRuntime) RemoveFile(_ context.Context, id string, _ string) error {
+	return m.refuse(id)
 }
 
 func (m *MockRuntime) Snapshot(_ context.Context, id string, name string) (*runtime.SnapshotInfo, error) {

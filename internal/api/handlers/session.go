@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/tmls-ai/guino/internal/engine"
+	"github.com/tmls-ai/guino/internal/runtime"
 )
 
 // SessionHandler exposes long-lived shells inside a sandbox.
@@ -44,7 +45,7 @@ func (h *SessionHandler) writeSessionError(w http.ResponseWriter, sandbox string
 	switch {
 	case errors.Is(err, engine.ErrNotFound):
 		writeError(w, http.StatusNotFound, "sandbox not found")
-	case errors.Is(err, engine.ErrNotRunning):
+	case errors.Is(err, engine.ErrNotRunning), errors.Is(err, runtime.ErrContainerNotRunning):
 		writeError(w, http.StatusConflict, "sandbox is not running")
 	case errors.Is(err, engine.ErrSessionUnsupported):
 		// 501, not 500: the request is valid and the server is healthy — this

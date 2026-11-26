@@ -609,14 +609,32 @@ func reviving[T any](ctx context.Context, e *Engine, id string, op func() (T, er
 	return v, err
 }
 
+// reviveTimeout bounds one start of a dead container; reviveBackoff is how
+// soon after a start a container that died again is left stopped instead of
+// started once more, so an image that dies at once does not loop.
+const (
+	reviveTimeout = time.Minute
+	reviveBackoff = 10 * time.Second
+)
+
 // revive starts again the container of a sandbox Guino holds as running when
 // that container ended on its own (its main process exited, was killed, or ran
 // out of memory). Without it the sandbox stays "running" with a dead container:
-// every exec fails and nothing ever restarts it. It looks under the sandbox's
-// claim, so a stop, start, archive or destroy in flight is left alone. A
-// container that will not start is recorded as stopped, which GET reports.
-// Reports whether the container runs.
+// every exec fails and nothing ever restarts it.
+//
+// One caller at a time revives a sandbox; a caller that waited finds the
+// container running and goes on. It holds the sandbox's claim, so a stop,
+// start, archive or destroy in flight is left alone, and it is admitted like
+// a Start (not while draining or under critical pressure). A container that is
+// not started again (refused, failed, or dead again within reviveBackoff) is
+// recorded as stopped, which GET reports. Reports whether the container runs.
 func (e *Engine) revive(ctx context.Context, sb *Sandbox) bool {
+	// The caller's request may end any moment; a start cut off half way would
+	// leave the status wrong.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reviveTimeout)
+	defer cancel()
+	sb.reviveMu.Lock()
+	defer sb.reviveMu.Unlock()
 	if sb.claim() != nil {
 		return false
 	}
@@ -634,16 +652,27 @@ func (e *Engine) revive(ctx context.Context, sb *Sandbox) bool {
 	if cur, err := e.GetSandbox(sb.ID); err != nil || cur != sb {
 		return false // destroyed meanwhile
 	}
-	if err := e.runtime.Start(ctx, sb.ID); err != nil {
-		sb.setStatus(runtime.StatusStopped)
-		e.logger.Warn("sandbox container exited on its own and did not start again", "id", sb.ID, "error", err)
-		if err := e.saveSandbox(sb); err != nil {
-			e.logger.Warn("failed to save sandbox state after exit", "id", sb.ID, "error", err)
-		}
-		return false
+	err = e.admit(true, nil)
+	if err == nil && time.Since(sb.revivedAt) < reviveBackoff {
+		err = fmt.Errorf("died again within %s of its last start", reviveBackoff)
 	}
-	e.logger.Warn("sandbox container exited on its own, started again", "id", sb.ID, "docker_status", info.Status)
-	return true
+	if err == nil {
+		err = e.runtime.Start(ctx, sb.ID)
+	}
+	if err == nil {
+		sb.revivedAt = time.Now()
+		e.logger.Warn("sandbox container exited on its own, started again", "id", sb.ID, "docker_status", info.Status)
+		return true
+	}
+	if after, ierr := e.runtime.Info(ctx, sb.ID); ierr == nil && after.Status == runtime.StatusRunning {
+		return true
+	}
+	sb.setStatus(runtime.StatusStopped)
+	e.logger.Warn("sandbox container exited on its own, left stopped", "id", sb.ID, "error", err)
+	if err := e.saveSandbox(sb); err != nil {
+		e.logger.Warn("failed to save sandbox state after exit", "id", sb.ID, "error", err)
+	}
+	return false
 }
 
 // acquire checks the sandbox is running and holds it in the same step, so an
