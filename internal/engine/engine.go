@@ -486,11 +486,19 @@ func (e *Engine) StartSandbox(ctx context.Context, id string) error {
 // Info returns live runtime information for a sandbox, including the container
 // IP. Works regardless of run state (does not require the sandbox to be
 // running) so callers can resolve the address of a just-started sandbox.
+//
+// A sandbox held as running whose container ended on its own is started again
+// here (see revive), so GET never answers running for a dead container.
 func (e *Engine) Info(ctx context.Context, id string) (*runtime.SandboxInfo, error) {
-	if _, err := e.GetSandbox(id); err != nil {
+	sb, err := e.GetSandbox(id)
+	if err != nil {
 		return nil, err
 	}
-	return e.runtime.Info(ctx, id)
+	info, err := e.runtime.Info(ctx, id)
+	if err == nil && info.Status != runtime.StatusRunning && !info.Paused && e.revive(ctx, sb) {
+		info, err = e.runtime.Info(ctx, id)
+	}
+	return info, err
 }
 
 // DestroySandbox stops and removes a sandbox.
@@ -586,6 +594,58 @@ func (e *Engine) requireRunning(id string) error {
 	return nil
 }
 
+// reviving runs op, and runs it once more after starting the container again
+// when op was refused because the container had ended on its own: a `kill 1`,
+// or a `pkill -f python` that takes a Python init with it. A refused exec never
+// ran, so the retry cannot run a command twice.
+func reviving[T any](ctx context.Context, e *Engine, id string, op func() (T, error)) (T, error) {
+	v, err := op()
+	if !errors.Is(err, runtime.ErrContainerNotRunning) {
+		return v, err
+	}
+	if sb, gerr := e.GetSandbox(id); gerr == nil && e.revive(ctx, sb) {
+		return op()
+	}
+	return v, err
+}
+
+// revive starts again the container of a sandbox Guino holds as running when
+// that container ended on its own (its main process exited, was killed, or ran
+// out of memory). Without it the sandbox stays "running" with a dead container:
+// every exec fails and nothing ever restarts it. It looks under the sandbox's
+// claim, so a stop, start, archive or destroy in flight is left alone. A
+// container that will not start is recorded as stopped, which GET reports.
+// Reports whether the container runs.
+func (e *Engine) revive(ctx context.Context, sb *Sandbox) bool {
+	if sb.claim() != nil {
+		return false
+	}
+	defer sb.release()
+	if sb.GetStatus() != runtime.StatusRunning {
+		return false
+	}
+	info, err := e.runtime.Info(ctx, sb.ID)
+	if err != nil || info.Paused {
+		return false
+	}
+	if info.Status == runtime.StatusRunning {
+		return true
+	}
+	if cur, err := e.GetSandbox(sb.ID); err != nil || cur != sb {
+		return false // destroyed meanwhile
+	}
+	if err := e.runtime.Start(ctx, sb.ID); err != nil {
+		sb.setStatus(runtime.StatusStopped)
+		e.logger.Warn("sandbox container exited on its own and did not start again", "id", sb.ID, "error", err)
+		if err := e.saveSandbox(sb); err != nil {
+			e.logger.Warn("failed to save sandbox state after exit", "id", sb.ID, "error", err)
+		}
+		return false
+	}
+	e.logger.Warn("sandbox container exited on its own, started again", "id", sb.ID, "docker_status", info.Status)
+	return true
+}
+
 // acquire checks the sandbox is running and holds it in the same step, so an
 // archive cannot begin between the check and the operation. Every operation
 // *on* a running sandbox is activity, and they all pass through here: exec,
@@ -607,7 +667,7 @@ func (e *Engine) Exec(ctx context.Context, id string, opts runtime.ExecOpts) (*r
 		return nil, err
 	}
 	defer release()
-	return e.runtime.Exec(ctx, id, opts)
+	return reviving(ctx, e, id, func() (*runtime.ExecResult, error) { return e.runtime.Exec(ctx, id, opts) })
 }
 
 // ExecStream runs a streaming command in a sandbox.
@@ -616,7 +676,7 @@ func (e *Engine) ExecStream(ctx context.Context, id string, opts runtime.ExecOpt
 	if err != nil {
 		return nil, err
 	}
-	stream, err := e.runtime.ExecStream(ctx, id, opts)
+	stream, err := reviving(ctx, e, id, func() (runtime.ExecStream, error) { return e.runtime.ExecStream(ctx, id, opts) })
 	if err != nil {
 		release()
 		return nil, err
@@ -640,7 +700,7 @@ func (e *Engine) ReadFile(ctx context.Context, id string, path string) ([]byte, 
 	if err := e.requireRunning(id); err != nil {
 		return nil, err
 	}
-	return e.runtime.ReadFile(ctx, id, path)
+	return reviving(ctx, e, id, func() ([]byte, error) { return e.runtime.ReadFile(ctx, id, path) })
 }
 
 // WriteFile writes a file to a sandbox.
@@ -648,7 +708,8 @@ func (e *Engine) WriteFile(ctx context.Context, id string, path string, content 
 	if err := e.requireRunning(id); err != nil {
 		return err
 	}
-	return e.runtime.WriteFile(ctx, id, path, content)
+	_, err := reviving(ctx, e, id, func() (struct{}, error) { return struct{}{}, e.runtime.WriteFile(ctx, id, path, content) })
+	return err
 }
 
 // ListDir lists a directory in a sandbox.
@@ -656,7 +717,7 @@ func (e *Engine) ListDir(ctx context.Context, id string, path string) ([]runtime
 	if err := e.requireRunning(id); err != nil {
 		return nil, err
 	}
-	return e.runtime.ListDir(ctx, id, path)
+	return reviving(ctx, e, id, func() ([]runtime.FileInfo, error) { return e.runtime.ListDir(ctx, id, path) })
 }
 
 // Stat returns metadata for a single file or directory in a sandbox.
@@ -664,7 +725,7 @@ func (e *Engine) Stat(ctx context.Context, id string, path string) (*runtime.Fil
 	if err := e.requireRunning(id); err != nil {
 		return nil, err
 	}
-	return e.runtime.Stat(ctx, id, path)
+	return reviving(ctx, e, id, func() (*runtime.FileInfo, error) { return e.runtime.Stat(ctx, id, path) })
 }
 
 // MkDir creates a directory in a sandbox.
@@ -672,7 +733,8 @@ func (e *Engine) MkDir(ctx context.Context, id string, path string) error {
 	if err := e.requireRunning(id); err != nil {
 		return err
 	}
-	return e.runtime.MkDir(ctx, id, path)
+	_, err := reviving(ctx, e, id, func() (struct{}, error) { return struct{}{}, e.runtime.MkDir(ctx, id, path) })
+	return err
 }
 
 // RemoveFile removes a file from a sandbox.
@@ -680,7 +742,8 @@ func (e *Engine) RemoveFile(ctx context.Context, id string, path string) error {
 	if err := e.requireRunning(id); err != nil {
 		return err
 	}
-	return e.runtime.RemoveFile(ctx, id, path)
+	_, err := reviving(ctx, e, id, func() (struct{}, error) { return struct{}{}, e.runtime.RemoveFile(ctx, id, path) })
+	return err
 }
 
 // Snapshot creates a snapshot of a sandbox.

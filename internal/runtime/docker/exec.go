@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
 
@@ -39,7 +40,7 @@ func (r *DockerRuntime) Exec(ctx context.Context, id string, opts runtime.ExecOp
 
 	execResp, err := r.cli.ContainerExecCreate(ctx, containerName, execCfg)
 	if err != nil {
-		return nil, fmt.Errorf("creating exec in %s: %w", id, err)
+		return nil, fmt.Errorf("creating exec in %s: %w", id, execCreateError(err))
 	}
 
 	attachResp, err := r.cli.ContainerExecAttach(ctx, execResp.ID, container.ExecAttachOptions{})
@@ -146,7 +147,7 @@ func (r *DockerRuntime) ExecStream(ctx context.Context, id string, opts runtime.
 		if cancel != nil {
 			cancel()
 		}
-		return nil, fmt.Errorf("creating exec stream in %s: %w", id, err)
+		return nil, fmt.Errorf("creating exec stream in %s: %w", id, execCreateError(err))
 	}
 
 	attachResp, err := r.cli.ContainerExecAttach(ctx, execResp.ID, container.ExecAttachOptions{})
@@ -228,4 +229,13 @@ func (r *DockerRuntime) ExecStream(ctx context.Context, id string, opts runtime.
 	}()
 
 	return stream, nil
+}
+
+// execCreateError marks an exec refused because the container is not running,
+// so the engine can tell it from a failure of the command itself.
+func execCreateError(err error) error {
+	if cerrdefs.IsConflict(err) {
+		return fmt.Errorf("%w: %w", runtime.ErrContainerNotRunning, err)
+	}
+	return err
 }

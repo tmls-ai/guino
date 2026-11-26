@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -189,4 +190,99 @@ func TestSandbox_SetStatus_ThreadSafe(t *testing.T) {
 	}
 	<-done
 	assert.Equal(t, runtime.StatusRunning, sb.GetStatus())
+}
+
+// A container whose process ended on its own (a `kill 1` from inside) is
+// started again by the next exec, which then runs; nothing ran twice.
+func TestEngine_ExecRevivesExitedContainer(t *testing.T) {
+	eng, mock := newTestEngine(t)
+	ctx := context.Background()
+	sb, err := eng.CreateSandbox(ctx, runtime.SandboxConfig{Image: "test:latest"})
+	require.NoError(t, err)
+	mock.Started[sb.ID] = false
+
+	mock.Exited[sb.ID] = true
+	res, err := eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"echo", "ok"}})
+	require.NoError(t, err)
+	assert.Equal(t, "ok\n", res.Stdout)
+	assert.True(t, mock.Started[sb.ID])
+	assert.Equal(t, runtime.StatusRunning, sb.GetStatus())
+
+	// The file and session paths run on exec too.
+	mock.Exited[sb.ID] = true
+	_, err = eng.ListDir(ctx, sb.ID, "/workspace")
+	require.NoError(t, err)
+}
+
+// GET (Info) on a dead container starts it again too, so it never answers
+// running for a container that is not.
+func TestEngine_InfoRevivesExitedContainer(t *testing.T) {
+	eng, mock := newTestEngine(t)
+	ctx := context.Background()
+	sb, err := eng.CreateSandbox(ctx, runtime.SandboxConfig{Image: "test:latest"})
+	require.NoError(t, err)
+
+	mock.Exited[sb.ID] = true
+	info, err := eng.Info(ctx, sb.ID)
+	require.NoError(t, err)
+	assert.Equal(t, runtime.StatusRunning, info.Status)
+	assert.Equal(t, runtime.StatusRunning, sb.GetStatus())
+	assert.False(t, mock.Exited[sb.ID])
+}
+
+// A container that will not start again is recorded as stopped: the exec
+// fails with the runtime's error and GET reports stopped, so the caller can
+// replace it.
+func TestEngine_ReviveFailureRecordsStopped(t *testing.T) {
+	eng, mock := newTestEngine(t)
+	ctx := context.Background()
+	sb, err := eng.CreateSandbox(ctx, runtime.SandboxConfig{Image: "test:latest"})
+	require.NoError(t, err)
+
+	mock.StartFn = func(string) error { return errors.New("start failed") }
+	mock.Exited[sb.ID] = true
+	_, err = eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
+	assert.ErrorIs(t, err, runtime.ErrContainerNotRunning)
+	assert.Equal(t, runtime.StatusStopped, sb.GetStatus())
+
+	_, err = eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
+	assert.ErrorIs(t, err, ErrNotRunning)
+}
+
+// A paused container (an archive that froze it) is not an exited one.
+func TestEngine_InfoLeavesPausedContainer(t *testing.T) {
+	eng, mock := newTestEngine(t)
+	ctx := context.Background()
+	sb, err := eng.CreateSandbox(ctx, runtime.SandboxConfig{Image: "test:latest"})
+	require.NoError(t, err)
+	mock.Started[sb.ID] = false
+
+	mock.Paused[sb.ID] = true
+	_, err = eng.Info(ctx, sb.ID)
+	require.NoError(t, err)
+	assert.Equal(t, runtime.StatusRunning, sb.GetStatus())
+	assert.False(t, mock.Started[sb.ID])
+}
+
+// A lifecycle operation in flight owns the container: nothing is started
+// under it.
+func TestEngine_ReviveLeavesBusySandbox(t *testing.T) {
+	eng, mock := newTestEngine(t)
+	ctx := context.Background()
+	sb, err := eng.CreateSandbox(ctx, runtime.SandboxConfig{Image: "test:latest"})
+	require.NoError(t, err)
+	mock.Started[sb.ID] = false
+
+	require.NoError(t, sb.claim())
+	mock.Exited[sb.ID] = true
+	_, err = eng.Info(ctx, sb.ID)
+	require.NoError(t, err)
+	_, err = eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
+	assert.ErrorIs(t, err, runtime.ErrContainerNotRunning)
+	assert.False(t, mock.Started[sb.ID])
+	sb.release()
+
+	_, err = eng.Exec(ctx, sb.ID, runtime.ExecOpts{Cmd: []string{"true"}})
+	require.NoError(t, err)
+	assert.True(t, mock.Started[sb.ID])
 }

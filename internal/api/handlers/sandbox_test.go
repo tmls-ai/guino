@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -17,11 +18,18 @@ import (
 	"github.com/tmls-ai/guino/internal/config"
 	"github.com/tmls-ai/guino/internal/engine"
 	"github.com/tmls-ai/guino/internal/engine/enginetest"
+	"github.com/tmls-ai/guino/internal/runtime"
 	"github.com/tmls-ai/guino/internal/runtime/netpolicy"
 	"github.com/tmls-ai/guino/internal/store"
 )
 
 func newTestEngine(t *testing.T) *engine.Engine {
+	t.Helper()
+	eng, _ := newTestEngineWithMock(t)
+	return eng
+}
+
+func newTestEngineWithMock(t *testing.T) (*engine.Engine, *enginetest.MockRuntime) {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := store.NewBoltStore(filepath.Join(dir, "test.db"))
@@ -39,7 +47,7 @@ func newTestEngine(t *testing.T) *engine.Engine {
 	}
 
 	eng := engine.NewEngine(mock, st, cfg, config.S3Config{}, config.DefaultConfig().Resource, netpolicy.Policy{}, slog.Default())
-	return eng
+	return eng, mock
 }
 
 func TestSandboxHandler_Create(t *testing.T) {
@@ -97,6 +105,35 @@ func TestSandboxHandler_Get_NotFound(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// GET on a sandbox whose container exited on its own starts it again and
+// answers running; one that will not start is answered stopped. Never a
+// running answer for a dead container.
+func TestSandboxHandler_Get_ExitedContainer(t *testing.T) {
+	eng, mock := newTestEngineWithMock(t)
+	h := NewSandboxHandler(eng, slog.Default())
+	r := chi.NewRouter()
+	r.Get("/api/v1/sandboxes/{id}", h.Get)
+	get := func(id string) string {
+		req := httptest.NewRequest("GET", "/api/v1/sandboxes/"+id, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp sandboxResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		return string(resp.Status)
+	}
+
+	sb, err := eng.CreateSandbox(t.Context(), runtime.SandboxConfig{Image: "test:latest"})
+	require.NoError(t, err)
+	mock.Exited[sb.ID] = true
+	assert.Equal(t, "running", get(sb.ID))
+	assert.False(t, mock.Exited[sb.ID])
+
+	mock.StartFn = func(string) error { return errors.New("start failed") }
+	mock.Exited[sb.ID] = true
+	assert.Equal(t, "stopped", get(sb.ID))
 }
 
 func TestSandboxHandler_Delete(t *testing.T) {
